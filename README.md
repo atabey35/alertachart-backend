@@ -146,3 +146,14 @@ const fetchHistoricalData = async (exchange, pair, timeframe, from, to) => {
 
 MIT
 
+
+
+## 🔗 Related Links
+
+- **Frontend Repository**: https://github.com/atabey35/alertachart
+- **Backend Repository**: https://github.com/atabey35/alertachart-backend
+- **Integration Guide**: See DEPLOY.md
+
+---
+
+**Built with ❤️ by Atabey**
