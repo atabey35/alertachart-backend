@@ -7,6 +7,7 @@ import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import historicalRouter from './routes/historical.js';
+import tickerRouter from './routes/ticker.js';
 
 dotenv.config();
 
@@ -46,6 +47,7 @@ app.get('/health', (req, res) => {
 
 // API routes
 app.use('/api/historical', historicalRouter);
+app.use('/api/ticker', tickerRouter);
 
 // Error handler
 app.use((err, req, res, next) => {
