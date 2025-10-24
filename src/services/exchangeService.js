@@ -30,7 +30,7 @@ export async function fetchBinanceCandles(pair, from, to, timeframe, maxLimit = 
   let currentFrom = from;
   const LIMIT_PER_REQUEST = 1000; // Binance max
 
-  console.log(`[Binance] Fetching ${symbol} ${interval} with pagination...`);
+  console.log(`[Binance Spot] Fetching ${symbol} ${interval} with pagination...`);
 
   // Pagination loop
   while (currentFrom < to && allCandles.length < maxLimit) {
@@ -81,7 +81,73 @@ export async function fetchBinanceCandles(pair, from, to, timeframe, maxLimit = 
     }
   }
 
-  console.log(`[Binance] Total fetched: ${allCandles.length} candles`);
+  console.log(`[Binance Spot] Total fetched: ${allCandles.length} candles`);
+  return allCandles;
+}
+
+/**
+ * Fetch Binance Futures candles with pagination
+ */
+export async function fetchBinanceFuturesCandles(pair, from, to, timeframe, maxLimit = 5000) {
+  const interval = timeframeToInterval(timeframe);
+  const symbol = pair.toUpperCase();
+  const allCandles = [];
+  
+  let currentFrom = from;
+  const LIMIT_PER_REQUEST = 1000; // Binance Futures max
+
+  console.log(`[Binance Futures] Fetching ${symbol} ${interval} with pagination...`);
+
+  // Pagination loop
+  while (currentFrom < to && allCandles.length < maxLimit) {
+    const url = `https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}&interval=${interval}&startTime=${currentFrom}&endTime=${to}&limit=${LIMIT_PER_REQUEST}`;
+    
+    try {
+      const response = await fetch(url);
+      
+      if (!response.ok) {
+        console.error(`[Binance Futures] HTTP ${response.status}: ${await response.text()}`);
+        break;
+      }
+
+      const klines = await response.json();
+      
+      if (!klines || klines.length === 0) {
+        break; // No more data
+      }
+
+      // Convert to standard format (same as spot)
+      const candles = klines.map(k => ({
+        time: k[0],
+        open: parseFloat(k[1]),
+        high: parseFloat(k[2]),
+        low: parseFloat(k[3]),
+        close: parseFloat(k[4]),
+        volume: parseFloat(k[5]),
+      }));
+
+      allCandles.push(...candles);
+
+      // Update currentFrom to last candle time + 1ms
+      currentFrom = candles[candles.length - 1].time + 1;
+
+      console.log(`[Binance Futures] Fetched ${candles.length} candles, total: ${allCandles.length}`);
+
+      // If we got less than limit, we've reached the end
+      if (klines.length < LIMIT_PER_REQUEST) {
+        break;
+      }
+
+      // Rate limiting (be nice to Binance)
+      await sleep(100);
+
+    } catch (error) {
+      console.error(`[Binance Futures] Error:`, error.message);
+      break;
+    }
+  }
+
+  console.log(`[Binance Futures] Total fetched: ${allCandles.length} candles`);
   return allCandles;
 }
 

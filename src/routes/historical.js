@@ -4,7 +4,7 @@
  */
 
 import express from 'express';
-import { fetchBinanceCandles, fetchBybitCandles, fetchOKXCandles } from '../services/exchangeService.js';
+import { fetchBinanceCandles, fetchBinanceFuturesCandles, fetchBybitCandles, fetchOKXCandles } from '../services/exchangeService.js';
 
 const router = express.Router();
 
@@ -40,6 +40,10 @@ router.get('/:exchange/:pair/:timeframe', async (req, res) => {
     switch (exchange.toUpperCase()) {
       case 'BINANCE':
         candles = await fetchBinanceCandles(pair, fromTs, toTs, timeframeSeconds, limitNum);
+        break;
+      
+      case 'BINANCE_FUTURES':
+        candles = await fetchBinanceFuturesCandles(pair, fromTs, toTs, timeframeSeconds, limitNum);
         break;
       
       case 'BYBIT':
