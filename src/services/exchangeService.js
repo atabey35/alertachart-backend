@@ -6,6 +6,28 @@
 import fetch from 'node-fetch';
 
 /**
+ * Fetch with timeout and retry
+ */
+async function fetchWithRetry(url, maxRetries = 2, timeoutMs = 10000) {
+  for (let i = 0; i <= maxRetries; i++) {
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), timeoutMs);
+      
+      const response = await fetch(url, { signal: controller.signal });
+      clearTimeout(timeout);
+      
+      return response;
+    } catch (error) {
+      if (i === maxRetries) throw error;
+      
+      console.warn(`[Fetch Retry] Attempt ${i + 1} failed, retrying...`);
+      await sleep(1000 * (i + 1)); // Exponential backoff
+    }
+  }
+}
+
+/**
  * Convert timeframe seconds to Binance interval
  */
 function timeframeToInterval(timeframe) {
@@ -103,10 +125,18 @@ export async function fetchBinanceFuturesCandles(pair, from, to, timeframe, maxL
     const url = `https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}&interval=${interval}&startTime=${currentFrom}&endTime=${to}&limit=${LIMIT_PER_REQUEST}`;
     
     try {
-      const response = await fetch(url);
+      const response = await fetchWithRetry(url, 2, 15000); // 15s timeout, 2 retries
       
       if (!response.ok) {
-        console.error(`[Binance Futures] HTTP ${response.status}: ${await response.text()}`);
+        const errorText = await response.text();
+        console.error(`[Binance Futures] HTTP ${response.status}: ${errorText}`);
+        
+        // If rate limited, wait longer and continue
+        if (response.status === 418 || response.status === 429) {
+          console.warn(`[Binance Futures] Rate limited, waiting 5s...`);
+          await sleep(5000);
+          continue; // Try again
+        }
         break;
       }
 

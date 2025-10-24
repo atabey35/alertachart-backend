@@ -72,7 +72,16 @@ router.get('/:exchange/:pair/:timeframe', async (req, res) => {
 
   } catch (error) {
     console.error('[Historical Route Error]', error);
-    res.status(500).json({ 
+    
+    // Return empty data instead of error to prevent frontend crashes
+    res.json({
+      exchange,
+      pair,
+      timeframe: timeframeSeconds,
+      from: fromTs,
+      to: toTs,
+      count: 0,
+      data: [],
       error: error.message,
       timestamp: Date.now()
     });

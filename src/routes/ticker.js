@@ -5,11 +5,12 @@
 
 import express from 'express';
 import NodeCache from 'node-cache';
+import fetch from 'node-fetch';
 
 const router = express.Router();
 
-// Cache ticker data for 5 seconds to prevent rate limiting
-const tickerCache = new NodeCache({ stdTTL: 5 });
+// Cache ticker data for 15 seconds to prevent rate limiting
+const tickerCache = new NodeCache({ stdTTL: 15 });
 
 /**
  * Fetch 24h ticker data from Binance
@@ -26,16 +27,29 @@ async function fetchBinanceTicker(symbols, marketType = 'spot') {
   
   console.log(`[Ticker API] Fetching ${marketType} ticker for ${symbolsArray.length} symbols`);
   
-  const response = await fetch(url);
+  // Timeout after 10 seconds
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10000);
   
-  if (!response.ok) {
-    if (response.status === 418) {
-      throw new Error('Binance rate limit (418)');
+  try {
+    const response = await fetch(url, { signal: controller.signal });
+    clearTimeout(timeout);
+    
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error(`[Ticker API] HTTP ${response.status}: ${errorText}`);
+      
+      if (response.status === 418 || response.status === 429) {
+        throw new Error('Binance rate limit');
+      }
+      throw new Error(`Binance API error: ${response.status}`);
     }
-    throw new Error(`Binance API error: ${response.status}`);
+    
+    return await response.json();
+  } catch (error) {
+    clearTimeout(timeout);
+    throw error;
   }
-  
-  return await response.json();
 }
 
 /**
