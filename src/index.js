@@ -8,6 +8,11 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import historicalRouter from './routes/historical.js';
 import tickerRouter from './routes/ticker.js';
+import pushRouter from './routes/push.js';
+import alertsRouter from './routes/alerts.js';
+import alarmsRouter from './routes/alarms.js';
+import adminRouter from './routes/admin.js';
+import { getAutoPriceAlertService } from './lib/push/auto-price-alerts.js';
 
 dotenv.config();
 
@@ -48,6 +53,10 @@ app.get('/health', (req, res) => {
 // API routes
 app.use('/api/historical', historicalRouter);
 app.use('/api/ticker', tickerRouter);
+app.use('/api/push', pushRouter);
+app.use('/api/alerts', alertsRouter);
+app.use('/api/alarms', alarmsRouter);
+app.use('/api/admin', adminRouter);
 
 // Error handler
 app.use((err, req, res, next) => {
@@ -67,5 +76,17 @@ app.listen(PORT, () => {
   console.log(`🚀 Alerta Chart Backend running on port ${PORT}`);
   console.log(`📊 Environment: ${process.env.NODE_ENV || 'development'}`);
   console.log(`🌍 CORS enabled for: ${allowedOrigins.join(', ')}`);
+  
+  // Start auto price alert service
+  console.log('');
+  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  console.log('🔔 Starting Auto Price Alert Service...');
+  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  
+  const autoPriceService = getAutoPriceAlertService();
+  autoPriceService.start();
+  
+  console.log('');
+  console.log('✅ All services running!');
 });
 
