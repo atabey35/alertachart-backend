@@ -97,10 +97,14 @@ export async function sendPriceAlertNotification(tokens, symbol, currentPrice, t
   const emoji = direction === 'up' ? '📈' : '📉';
   const actionText = direction === 'up' ? 'yaklaşıyor' : 'iniyor';
   
+  // Format prices nicely
+  const formattedTarget = targetPrice.toLocaleString('en-US');
+  const formattedCurrent = currentPrice.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  
   return sendPushNotifications([{
     to: tokens,
     title: `${symbol} ${emoji}`,
-    body: `${symbol} ${targetPrice} ${direction === 'up' ? '$' : ''} seviyesine ${actionText}! Şu anki fiyat: ${currentPrice}`,
+    body: `${symbol} ${formattedTarget} $ seviyesine ${actionText}! Şu anki fiyat: ${formattedCurrent}`,
     data: {
       type: 'price_alert',
       symbol: symbol,

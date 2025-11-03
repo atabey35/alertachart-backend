@@ -16,10 +16,11 @@ export class AutoPriceAlertService {
     this.wsConnections = new Map();
     this.priceCache = new Map();
     this.lastNotifications = new Map(); // Symbol + level için son bildirim zamanı
+    this.triggeredLevels = new Map(); // Trigger edilmiş seviyeler (tekrar etmemek için)
     this.isRunning = false;
     
-    // Debouncing: Aynı seviye için 1 saat bekle
-    this.NOTIFICATION_COOLDOWN = 60 * 60 * 1000; // 1 saat
+    // Debouncing: Aynı seviye için 15 dakika bekle
+    this.NOTIFICATION_COOLDOWN = 15 * 60 * 1000; // 15 dakika
     
     // İzlenecek coin'ler ve önemli seviyeleri
     this.watchList = {
@@ -27,25 +28,29 @@ export class AutoPriceAlertService {
         name: 'Bitcoin',
         emoji: '₿',
         roundTo: 1000, // Her 1000$ bir seviye
-        proximityDelta: 200, // $200 yaklaştığında bildir
+        proximityDeltaUp: 100, // Yukarı yaklaşırken $100
+        proximityDeltaDown: 50, // Aşağı yaklaşırken $50
       },
       'ETHUSDT': {
         name: 'Ethereum',
         emoji: 'Ξ',
         roundTo: 100, // Her 100$ bir seviye
-        proximityDelta: 20, // $20 yaklaştığında bildir
+        proximityDeltaUp: 20, // Yukarı yaklaşırken $20
+        proximityDeltaDown: 10, // Aşağı yaklaşırken $10
       },
       'SOLUSDT': {
         name: 'Solana',
         emoji: '◎',
         roundTo: 10, // Her 10$ bir seviye
-        proximityDelta: 2, // $2 yaklaştığında bildir
+        proximityDeltaUp: 2, // Yukarı yaklaşırken $2
+        proximityDeltaDown: 1, // Aşağı yaklaşırken $1
       },
       'BNBUSDT': {
         name: 'BNB',
         emoji: '🔶',
         roundTo: 50, // Her 50$ bir seviye
-        proximityDelta: 5, // $5 yaklaştığında bildir
+        proximityDeltaUp: 5, // Yukarı yaklaşırken $5
+        proximityDeltaDown: 3, // Aşağı yaklaşırken $3
       },
     };
   }
@@ -157,7 +162,7 @@ export class AutoPriceAlertService {
     const config = this.watchList[symbol];
     if (!config) return;
 
-    const { roundTo, proximityDelta, name, emoji } = config;
+    const { roundTo, proximityDeltaUp, proximityDeltaDown, name, emoji } = config;
 
     // Bir sonraki yuvarlak sayıyı bul (yukarı)
     const nextLevelUp = Math.ceil(currentPrice / roundTo) * roundTo;
@@ -165,11 +170,12 @@ export class AutoPriceAlertService {
     const nextLevelDown = Math.floor(currentPrice / roundTo) * roundTo;
 
     // Yukarı yaklaşma kontrolü
-    if (nextLevelUp - currentPrice <= proximityDelta && currentPrice < nextLevelUp) {
+    const distanceToLevelUp = nextLevelUp - currentPrice;
+    if (distanceToLevelUp > 0 && distanceToLevelUp <= proximityDeltaUp) {
       const key = `${symbol}_${nextLevelUp}_up`;
       
-      if (this.shouldNotify(key)) {
-        console.log(`📈 ${name} approaching $${nextLevelUp.toLocaleString()} (current: $${currentPrice.toFixed(2)})`);
+      if (this.shouldNotify(key) && !this.isTriggered(key)) {
+        console.log(`📈 ${name} approaching $${nextLevelUp.toLocaleString()} (current: $${currentPrice.toFixed(2)}, distance: $${distanceToLevelUp.toFixed(2)})`);
         await this.sendNotificationToAll(
           symbol,
           name,
@@ -179,15 +185,21 @@ export class AutoPriceAlertService {
           'up'
         );
         this.markNotified(key);
+        this.markTriggered(key);
       }
+    } else if (currentPrice >= nextLevelUp) {
+      // Seviye geçildi, trigger'ı sıfırla
+      const key = `${symbol}_${nextLevelUp}_up`;
+      this.clearTriggered(key);
     }
 
     // Aşağı yaklaşma kontrolü
-    if (currentPrice - nextLevelDown <= proximityDelta && currentPrice > nextLevelDown) {
+    const distanceToLevelDown = currentPrice - nextLevelDown;
+    if (distanceToLevelDown > 0 && distanceToLevelDown <= proximityDeltaDown) {
       const key = `${symbol}_${nextLevelDown}_down`;
       
-      if (this.shouldNotify(key)) {
-        console.log(`📉 ${name} approaching $${nextLevelDown.toLocaleString()} (current: $${currentPrice.toFixed(2)})`);
+      if (this.shouldNotify(key) && !this.isTriggered(key)) {
+        console.log(`📉 ${name} approaching $${nextLevelDown.toLocaleString()} (current: $${currentPrice.toFixed(2)}, distance: $${distanceToLevelDown.toFixed(2)})`);
         await this.sendNotificationToAll(
           symbol,
           name,
@@ -197,7 +209,12 @@ export class AutoPriceAlertService {
           'down'
         );
         this.markNotified(key);
+        this.markTriggered(key);
       }
+    } else if (currentPrice <= nextLevelDown) {
+      // Seviye geçildi, trigger'ı sıfırla
+      const key = `${symbol}_${nextLevelDown}_down`;
+      this.clearTriggered(key);
     }
   }
 
@@ -221,6 +238,27 @@ export class AutoPriceAlertService {
   }
 
   /**
+   * Seviye tetiklenmiş mi kontrol et
+   */
+  isTriggered(key) {
+    return this.triggeredLevels.has(key);
+  }
+
+  /**
+   * Seviyeyi tetiklenmiş olarak işaretle
+   */
+  markTriggered(key) {
+    this.triggeredLevels.set(key, true);
+  }
+
+  /**
+   * Seviye tetiklenmesini temizle
+   */
+  clearTriggered(key) {
+    this.triggeredLevels.delete(key);
+  }
+
+  /**
    * TÜM aktif cihazlara bildirim gönder
    */
   async sendNotificationToAll(symbol, name, emoji, currentPrice, targetPrice, direction) {
@@ -233,23 +271,29 @@ export class AutoPriceAlertService {
         return;
       }
 
-      // Push token'ları topla (sadece geçerli olanlar)
-      const tokens = devices
-        .map(d => d.expo_push_token)
-        .filter(token => token && !token.includes('test-token'));
+      // Push token'ları topla (sadece geçerli ve benzersiz olanlar)
+      const uniqueTokens = new Set();
+      devices.forEach(d => {
+        const token = d.expo_push_token;
+        if (token && !token.includes('test-token')) {
+          uniqueTokens.add(token);
+        }
+      });
+
+      const tokens = Array.from(uniqueTokens);
 
       if (tokens.length === 0) {
         console.log('📱 No valid push tokens found');
         return;
       }
 
-      console.log(`📤 Sending notification to ${tokens.length} device(s)...`);
+      console.log(`📤 Sending notification to ${tokens.length} unique device(s)...`);
 
       // Bildirim mesajı
       const directionEmoji = direction === 'up' ? '📈' : '📉';
       const directionText = direction === 'up' ? 'yaklaşıyor' : 'iniyor';
-      const title = `${emoji} ${name} Fiyat Uyarısı`;
-      const body = `${directionEmoji} $${targetPrice.toLocaleString()} seviyesine ${directionText}! Şu an: $${currentPrice.toFixed(2)}`;
+      const title = `${symbol} ${directionEmoji}`;
+      const body = `${symbol} ${targetPrice.toLocaleString()} $ seviyesine ${directionText}! Şu anki fiyat: ${currentPrice.toFixed(2)}`;
 
       // Push notification gönder
       const success = await sendPriceAlertNotification(
@@ -300,4 +344,5 @@ export function getAutoPriceAlertService() {
   }
   return autoPriceAlertService;
 }
+
 
