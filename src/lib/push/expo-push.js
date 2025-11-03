@@ -122,13 +122,16 @@ export async function sendPriceAlertNotification(tokens, symbol, currentPrice, t
  * Send alarm notification
  */
 export async function sendAlarmNotification(tokens, symbol, message, alarmData) {
+  // Ensure symbol is uppercase
+  const upperSymbol = symbol.toUpperCase();
+  
   return sendPushNotifications([{
     to: tokens,
-    title: `🔔 Alarm: ${symbol}`,
+    title: `Alarm: ${upperSymbol}`,
     body: message,
     data: {
       type: 'alarm',
-      symbol: symbol,
+      symbol: upperSymbol,
       message: message,
       ...alarmData,
     },
@@ -136,6 +139,18 @@ export async function sendAlarmNotification(tokens, symbol, message, alarmData) 
     channelId: 'alarms',
     priority: 'high',
   }]);
+}
+
+/**
+ * Format price for display
+ * - Prices < 1: 4 decimals
+ * - Prices >= 1: 2 decimals
+ */
+export function formatPrice(price) {
+  if (price < 1) {
+    return parseFloat(price.toFixed(4));
+  }
+  return parseFloat(price.toFixed(2));
 }
 
 /**
