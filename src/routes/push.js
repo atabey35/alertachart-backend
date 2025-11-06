@@ -4,20 +4,22 @@
 
 import express from 'express';
 import { 
-  initPushDatabase, 
+  initPushDatabase,
   upsertDevice, 
   getDevice, 
   deactivateDevice 
 } from '../lib/push/db.js';
 import { sendTestNotification } from '../lib/push/expo-push.js';
+import { optionalAuth } from '../lib/auth/middleware.js';
 
 const router = express.Router();
 
 /**
  * POST /api/push/register
  * Register device for push notifications
+ * Optional: If user is authenticated, device will be linked to user
  */
-router.post('/register', async (req, res) => {
+router.post('/register', optionalAuth, async (req, res) => {
   try {
     const { deviceId, expoPushToken, platform, appVersion } = req.body;
 
@@ -31,21 +33,26 @@ router.post('/register', async (req, res) => {
     // Initialize database (first time)
     await initPushDatabase();
 
+    // Get userId from authenticated user (if available)
+    const userId = req.user?.userId || null;
+
     // Upsert device
     const device = await upsertDevice(
       deviceId,
       expoPushToken,
       platform,
-      appVersion || '1.0.0'
+      appVersion || '1.0.0',
+      userId
     );
 
-    console.log(`✅ Device registered: ${deviceId} (${platform})`);
+    console.log(`✅ Device registered: ${deviceId} (${platform})${userId ? ` for user ${userId}` : ''}`);
 
     res.json({
       success: true,
       device: {
         deviceId: device.device_id,
         platform: device.platform,
+        userId: device.user_id,
         createdAt: device.created_at,
       },
     });

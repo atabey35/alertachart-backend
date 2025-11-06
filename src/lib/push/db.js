@@ -88,16 +88,17 @@ export async function initPushDatabase() {
 }
 
 // Device operations
-export async function upsertDevice(deviceId, expoPushToken, platform, appVersion) {
+export async function upsertDevice(deviceId, expoPushToken, platform, appVersion, userId = null) {
   const sql = getSql();
   const result = await sql`
-    INSERT INTO devices (device_id, expo_push_token, platform, app_version, updated_at)
-    VALUES (${deviceId}, ${expoPushToken}, ${platform}, ${appVersion}, CURRENT_TIMESTAMP)
+    INSERT INTO devices (device_id, expo_push_token, platform, app_version, user_id, updated_at)
+    VALUES (${deviceId}, ${expoPushToken}, ${platform}, ${appVersion}, ${userId}, CURRENT_TIMESTAMP)
     ON CONFLICT (device_id)
     DO UPDATE SET
       expo_push_token = ${expoPushToken},
       platform = ${platform},
       app_version = ${appVersion},
+      user_id = COALESCE(${userId}, devices.user_id),
       is_active = true,
       updated_at = CURRENT_TIMESTAMP
     RETURNING *

@@ -12,7 +12,10 @@ import pushRouter from './routes/push.js';
 import alertsRouter from './routes/alerts.js';
 import alarmsRouter from './routes/alarms.js';
 import adminRouter from './routes/admin.js';
+import authRouter from './routes/auth.js';
 import { getAutoPriceAlertService } from './lib/push/auto-price-alerts.js';
+import { initPushDatabase } from './lib/push/db.js';
+import { initAuthDatabase } from './lib/auth/db.js';
 
 dotenv.config();
 
@@ -57,6 +60,7 @@ app.use('/api/push', pushRouter);
 app.use('/api/alerts', alertsRouter);
 app.use('/api/alarms', alarmsRouter);
 app.use('/api/admin', adminRouter);
+app.use('/api/auth', authRouter);
 
 // Error handler
 app.use((err, req, res, next) => {
@@ -72,10 +76,25 @@ app.use((req, res) => {
   res.status(404).json({ error: 'Not found' });
 });
 
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
   console.log(`🚀 Alerta Chart Backend running on port ${PORT}`);
   console.log(`📊 Environment: ${process.env.NODE_ENV || 'development'}`);
   console.log(`🌍 CORS enabled for: ${allowedOrigins.join(', ')}`);
+  
+  // Initialize databases
+  console.log('');
+  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  console.log('🗄️  Initializing databases...');
+  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  
+  try {
+    await initPushDatabase();
+    await initAuthDatabase();
+    console.log('✅ Databases initialized');
+  } catch (error) {
+    console.error('❌ Failed to initialize databases:', error);
+    process.exit(1);
+  }
   
   // Start auto price alert service
   console.log('');

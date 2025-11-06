@@ -73,6 +73,7 @@ router.post('/broadcast', async (req, res) => {
       },
       sound: 'default',
       priority: 'high',
+      channelId: 'default',  // Android notification channel
     }]);
 
     if (success) {

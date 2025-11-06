@@ -64,11 +64,14 @@ export async function sendPushNotifications(payloads) {
     for (const chunk of chunks) {
       try {
         const ticketChunk = await expo.sendPushNotificationsAsync(chunk);
+        console.log('Expo ticket chunk:', JSON.stringify(ticketChunk, null, 2));
         tickets.push(...ticketChunk);
       } catch (error) {
         console.error('Error sending push notification chunk:', error);
       }
     }
+
+    console.log('Expo tickets aggregated:', JSON.stringify(tickets, null, 2));
 
     // Check for errors
     let hasErrors = false;
