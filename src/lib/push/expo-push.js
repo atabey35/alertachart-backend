@@ -38,7 +38,7 @@ export async function sendPushNotifications(payloads) {
           continue;
         }
 
-        messages.push({
+        const message = {
           to: token,
           title: payload.title,
           body: payload.body,
@@ -48,13 +48,29 @@ export async function sendPushNotifications(payloads) {
           channelId: payload.channelId || 'default',
           priority: payload.priority || 'high',
           ttl: payload.ttl || 86400,
-          color: payload.color,
-          icon: payload.icon,
-          image: payload.image,
-          subtitle: payload.subtitle,
-          categoryId: payload.categoryId,
-          collapseId: payload.collapseId,
-        });
+        };
+        
+        // Only add optional fields if they have valid values
+        if (payload.color && /^#[0-9A-Fa-f]{6}$/.test(payload.color)) {
+          message.color = payload.color;
+        }
+        if (payload.icon) {
+          message.icon = payload.icon;
+        }
+        if (payload.image) {
+          message.image = payload.image;
+        }
+        if (payload.subtitle) {
+          message.subtitle = payload.subtitle;
+        }
+        if (payload.categoryId) {
+          message.categoryId = payload.categoryId;
+        }
+        if (payload.collapseId) {
+          message.collapseId = payload.collapseId;
+        }
+        
+        messages.push(message);
       }
     }
 
