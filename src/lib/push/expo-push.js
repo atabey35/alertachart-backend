@@ -149,7 +149,7 @@ export async function sendPriceAlertNotification(tokens, symbol, currentPrice, t
 export async function sendAlarmNotification(tokens, symbol, message, alarmData) {
   // Ensure symbol is uppercase
   const upperSymbol = symbol.toUpperCase();
-  const brandColor = '#0A84FF';
+  const brandColor = '#0a84ff';
   
   return sendPushNotifications([{
     to: tokens,
