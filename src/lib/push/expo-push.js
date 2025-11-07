@@ -138,7 +138,7 @@ export async function sendPriceAlertNotification(tokens, symbol, currentPrice, t
       direction: direction,
     },
     sound: 'default',
-    channelId: 'price-alerts',
+    channelId: 'price-alerts-v2',
     priority: 'high',
   }]);
 }
@@ -162,11 +162,9 @@ export async function sendAlarmNotification(tokens, symbol, message, alarmData) 
       ...alarmData,
     },
     sound: 'default',
-    channelId: 'alarms',
+    channelId: 'alarms-v2',
     priority: 'high',
-    color: brandColor,
     icon: 'notification_icon',
-    image: 'resource://alerta_logo',
   }]);
 }
 
