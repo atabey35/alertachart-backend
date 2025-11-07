@@ -48,6 +48,12 @@ export async function sendPushNotifications(payloads) {
           channelId: payload.channelId || 'default',
           priority: payload.priority || 'high',
           ttl: payload.ttl || 86400,
+          color: payload.color,
+          icon: payload.icon,
+          image: payload.image,
+          subtitle: payload.subtitle,
+          categoryId: payload.categoryId,
+          collapseId: payload.collapseId,
         });
       }
     }
@@ -127,6 +133,7 @@ export async function sendPriceAlertNotification(tokens, symbol, currentPrice, t
 export async function sendAlarmNotification(tokens, symbol, message, alarmData) {
   // Ensure symbol is uppercase
   const upperSymbol = symbol.toUpperCase();
+  const brandColor = '#0A84FF';
   
   return sendPushNotifications([{
     to: tokens,
@@ -141,6 +148,9 @@ export async function sendAlarmNotification(tokens, symbol, message, alarmData) 
     sound: 'default',
     channelId: 'alarms',
     priority: 'high',
+    color: brandColor,
+    icon: 'notification_icon',
+    image: 'resource://alerta_logo',
   }]);
 }
 

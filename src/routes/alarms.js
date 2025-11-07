@@ -80,13 +80,13 @@ router.post('/notify', authenticateToken, async (req, res) => {
         devices = [targetDevice];
         targetDeviceInfo = `Device ${targetDevice.device_id} (by pushToken)`;
         console.log(`✅ Found device by pushToken - Sending ONLY to this device`);
-      } else {
+    } else {
         console.log(`❌ Push token not found or doesn't belong to user ${userId} - NOT sending to any device`);
-        return res.json({ 
-          success: true, 
+      return res.json({ 
+        success: true, 
           message: 'Device not found or not owned by user',
-          sent: 0,
-        });
+        sent: 0,
+      });
       }
     } else {
       // Priority 3: Send to all user's devices

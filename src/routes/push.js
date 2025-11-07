@@ -4,7 +4,7 @@
 
 import express from 'express';
 import { 
-  initPushDatabase,
+  initPushDatabase, 
   upsertDevice, 
   getDevice, 
   deactivateDevice 
