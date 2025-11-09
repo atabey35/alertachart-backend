@@ -15,12 +15,21 @@ export class AutoPriceAlertService {
   constructor() {
     this.wsConnections = new Map();
     this.priceCache = new Map();
+    this.prevPriceCache = new Map(); // Önceki fiyatları sakla (zona muerta için)
     this.lastNotifications = new Map(); // Symbol + level için son bildirim zamanı
     this.triggeredLevels = new Map(); // Trigger edilmiş seviyeler (tekrar etmemek için)
     this.isRunning = false;
     
-    // Debouncing: Aynı seviye için 15 dakika bekle
-    this.NOTIFICATION_COOLDOWN = 15 * 60 * 1000; // 15 dakika
+    // COOLDOWN: Aynı seviye için 5 dakika bekle (15 dakikaydı, çok uzundu)
+    this.NOTIFICATION_COOLDOWN = 5 * 60 * 1000; // 5 dakika
+    
+    // ZONA MUERTA: Her coin için tolerans yüzdeleri
+    this.TOLERANCE_PERCENTAGES = {
+      'BTCUSDT': 0.15,  // %0.15 (104K'da ±156 USD zona muerta)
+      'ETHUSDT': 0.20,  // %0.20 
+      'SOLUSDT': 0.25,  // %0.25
+      'BNBUSDT': 0.20,  // %0.20
+    };
     
     // İzlenecek coin'ler ve önemli seviyeleri
     this.watchList = {
@@ -119,6 +128,12 @@ export class AutoPriceAlertService {
           
           if (price) {
             const oldPrice = this.priceCache.get(symbol);
+            
+            // Önceki fiyatı sakla (zona muerta kontrolü için)
+            if (oldPrice !== undefined) {
+              this.prevPriceCache.set(symbol, oldPrice);
+            }
+            
             this.priceCache.set(symbol, price);
             
             // Fiyat değiştiğinde kontrol et
@@ -156,6 +171,24 @@ export class AutoPriceAlertService {
   }
 
   /**
+   * Zona muerta (dead-zone) hesapla
+   * Proximity delta'nın %yüzdeliği kadar ek tolerans ekle
+   * Böylece fiyat seviyeye ÇOK yakınken bildirim gönderilmez
+   */
+  calculateDeadZone(targetPrice, proximityDelta, symbol) {
+    const tolerance = this.TOLERANCE_PERCENTAGES[symbol] || 0.25;
+    
+    // Zona muerta = proximityDelta + (proximityDelta * tolerance%)
+    // Örnek BNB: proximityDelta=5, tolerance=20% → deadZone = 5 + (5*0.20) = 6$
+    const deadZoneAmount = proximityDelta * (1 + (tolerance / 100));
+    
+    return {
+      lower: targetPrice - deadZoneAmount,
+      upper: targetPrice + deadZoneAmount
+    };
+  }
+
+  /**
    * Fiyat seviyesini kontrol et ve gerekirse bildirim gönder
    */
   async checkPriceLevel(symbol, currentPrice) {
@@ -163,29 +196,59 @@ export class AutoPriceAlertService {
     if (!config) return;
 
     const { roundTo, proximityDeltaUp, proximityDeltaDown, name, emoji } = config;
+    const prevPrice = this.prevPriceCache.get(symbol);
+
+    // Önceki fiyat yoksa, henüz kontrol yapma (ilk tick)
+    if (prevPrice === undefined) {
+      return;
+    }
 
     // Bir sonraki yuvarlak sayıyı bul (yukarı)
     const nextLevelUp = Math.ceil(currentPrice / roundTo) * roundTo;
     // Bir önceki yuvarlak sayıyı bul (aşağı)
     const nextLevelDown = Math.floor(currentPrice / roundTo) * roundTo;
 
-    // Yukarı yaklaşma kontrolü
+    // Zona muerta hesapla (proximity delta'ya göre)
+    const deadZoneUp = this.calculateDeadZone(nextLevelUp, proximityDeltaUp, symbol);
+    const deadZoneDown = this.calculateDeadZone(nextLevelDown, proximityDeltaDown, symbol);
+
+    // YUKARIYA YAKLAŞMA KONTROLÜ
     const distanceToLevelUp = nextLevelUp - currentPrice;
     if (distanceToLevelUp > 0 && distanceToLevelUp <= proximityDeltaUp) {
       const key = `${symbol}_${nextLevelUp}_up`;
       
+      // Cooldown ve trigger kontrolü
       if (this.shouldNotify(key) && !this.isTriggered(key)) {
-        console.log(`📈 ${name} approaching $${nextLevelUp.toLocaleString()} (current: $${currentPrice.toFixed(2)}, distance: $${distanceToLevelUp.toFixed(2)})`);
-        await this.sendNotificationToAll(
-          symbol,
-          name,
-          emoji,
-          currentPrice,
-          nextLevelUp,
-          'up'
-        );
-        this.markNotified(key);
-        this.markTriggered(key);
+        // ZONA MUERTA KONTROLÜ: Fiyat yukarıya doğru hareket ediyor mu?
+        const isMovingUp = currentPrice > prevPrice;
+        
+        // ÖNEMLİ: Eğer önceki fiyat seviyenin ÜSTÜNDEYSE, şimdi ALTINA inmiş demektir
+        // Bu durumda "yaklaşıyor" bildirimi GÖNDERMEMELİYİZ (yeni aşağı indi, spam olur)
+        const justCrossedBelow = prevPrice > nextLevelUp && currentPrice < nextLevelUp;
+        
+        // Fiyat yuvarlak sayıya çok yakınsa (zona muerta içinde) VE hareket aşağı yönlüyse bildirim GÖNDERME
+        const tooCloseToTarget = currentPrice >= deadZoneUp.lower && currentPrice <= deadZoneUp.upper;
+        
+        // Bildirim gönder: Cooldown OK + Triggered değil + Zona muerta dışında VEYA yukarı hareket + Yeni aşağı geçiş DEĞİL
+        if ((!tooCloseToTarget || isMovingUp) && !justCrossedBelow) {
+          console.log(`📈 ${name} ${nextLevelUp.toLocaleString()}$ seviyesine yaklaşıyor (şu an: ${currentPrice.toFixed(2)}$, mesafe: ${distanceToLevelUp.toFixed(2)}$)`);
+          console.log(`   💡 Zona muerta: ${deadZoneUp.lower.toFixed(2)} - ${deadZoneUp.upper.toFixed(2)}, Hareket: ${isMovingUp ? '⬆️' : '⬇️'}`);
+          
+          await this.sendNotificationToAll(
+            symbol,
+            name,
+            emoji,
+            currentPrice,
+            nextLevelUp,
+            'up'
+          );
+          this.markNotified(key);
+          this.markTriggered(key);
+        } else if (justCrossedBelow) {
+          console.log(`⏸️  ${name} seviyeyi yeni aşağı geçti (${currentPrice.toFixed(2)}$), "yaklaşıyor" bildirimi gönderilmedi`);
+        } else {
+          console.log(`⏸️  ${name} zona muerta içinde (${currentPrice.toFixed(2)}$), bildirim bekleniyor...`);
+        }
       }
     } else if (currentPrice >= nextLevelUp) {
       // Seviye geçildi, trigger'ı sıfırla
@@ -193,23 +256,43 @@ export class AutoPriceAlertService {
       this.clearTriggered(key);
     }
 
-    // Aşağı yaklaşma kontrolü
+    // AŞAĞIYA YAKLAŞMA KONTROLÜ
     const distanceToLevelDown = currentPrice - nextLevelDown;
     if (distanceToLevelDown > 0 && distanceToLevelDown <= proximityDeltaDown) {
       const key = `${symbol}_${nextLevelDown}_down`;
       
+      // Cooldown ve trigger kontrolü
       if (this.shouldNotify(key) && !this.isTriggered(key)) {
-        console.log(`📉 ${name} approaching $${nextLevelDown.toLocaleString()} (current: $${currentPrice.toFixed(2)}, distance: $${distanceToLevelDown.toFixed(2)})`);
-        await this.sendNotificationToAll(
-          symbol,
-          name,
-          emoji,
-          currentPrice,
-          nextLevelDown,
-          'down'
-        );
-        this.markNotified(key);
-        this.markTriggered(key);
+        // ZONA MUERTA KONTROLÜ: Fiyat aşağıya doğru hareket ediyor mu?
+        const isMovingDown = currentPrice < prevPrice;
+        
+        // ÖNEMLİ: Eğer önceki fiyat seviyenin ALTINDAYSA, şimdi ÜSTÜNE çıkmış demektir
+        // Bu durumda "iniyor" bildirimi GÖNDERMEMELİYİZ (yeni yukarı çıktı, spam olur)
+        const justCrossedAbove = prevPrice < nextLevelDown && currentPrice > nextLevelDown;
+        
+        // Fiyat yuvarlak sayıya çok yakınsa (zona muerta içinde) VE hareket yukarı yönlüyse bildirim GÖNDERME
+        const tooCloseToTarget = currentPrice >= deadZoneDown.lower && currentPrice <= deadZoneDown.upper;
+        
+        // Bildirim gönder: Cooldown OK + Triggered değil + Zona muerta dışında VEYA aşağı hareket + Yeni yukarı geçiş DEĞİL
+        if ((!tooCloseToTarget || isMovingDown) && !justCrossedAbove) {
+          console.log(`📉 ${name} ${nextLevelDown.toLocaleString()}$ seviyesine iniyor (şu an: ${currentPrice.toFixed(2)}$, mesafe: ${distanceToLevelDown.toFixed(2)}$)`);
+          console.log(`   💡 Zona muerta: ${deadZoneDown.lower.toFixed(2)} - ${deadZoneDown.upper.toFixed(2)}, Hareket: ${isMovingDown ? '⬇️' : '⬆️'}`);
+          
+          await this.sendNotificationToAll(
+            symbol,
+            name,
+            emoji,
+            currentPrice,
+            nextLevelDown,
+            'down'
+          );
+          this.markNotified(key);
+          this.markTriggered(key);
+        } else if (justCrossedAbove) {
+          console.log(`⏸️  ${name} seviyeyi yeni yukarı geçti (${currentPrice.toFixed(2)}$), "iniyor" bildirimi gönderilmedi`);
+        } else {
+          console.log(`⏸️  ${name} zona muerta içinde (${currentPrice.toFixed(2)}$), bildirim bekleniyor...`);
+        }
       }
     } else if (currentPrice <= nextLevelDown) {
       // Seviye geçildi, trigger'ı sıfırla
