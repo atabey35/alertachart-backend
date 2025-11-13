@@ -304,3 +304,6 @@ const deadZoneUp = this.calculateDeadZone(nextLevelUp, proximityDeltaUp, symbol)
 **Versiyon**: 2.1 (Zona Muerta Düzeltmesi)  
 **Durum**: ✅ Hazır
 
+
+
+

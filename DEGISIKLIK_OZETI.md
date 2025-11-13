@@ -136,3 +136,6 @@ Tam açıklama için: `OTOMATIK_BILDIRIM_OPTIMIZASYONU.md`
 
 **Özet**: Spam bildirimler %80 azalacak, kullanıcılar mutlu olacak! 🎉
 
+
+
+

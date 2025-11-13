@@ -346,3 +346,6 @@ if ((!tooCloseToTarget || isMovingUp) && !justCrossedBelow) {
 **Versiyon**: 2.2 (Crossover Spam Fix)  
 **Durum**: ✅ Hazır
 
+
+
+
