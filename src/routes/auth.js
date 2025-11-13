@@ -77,6 +77,26 @@ router.post('/register', async (req, res) => {
     // Update last login
     await updateUserLastLogin(user.id);
 
+    // Set httpOnly cookies for secure token storage across subdomains
+    const isProduction = process.env.NODE_ENV === 'production';
+    const cookieOptions = {
+      httpOnly: true,
+      secure: isProduction,
+      sameSite: isProduction ? 'none' : 'lax',
+      domain: isProduction ? '.alertachart.com' : undefined,
+      path: '/',
+    };
+
+    res.cookie('accessToken', accessToken, {
+      ...cookieOptions,
+      maxAge: 15 * 60 * 1000, // 15 minutes
+    });
+
+    res.cookie('refreshToken', refreshToken, {
+      ...cookieOptions,
+      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+    });
+
     res.json({
       success: true,
       user: {
@@ -84,10 +104,7 @@ router.post('/register', async (req, res) => {
         email: user.email,
         name: user.name,
       },
-      tokens: {
-        accessToken,
-        refreshToken,
-      },
+      token: accessToken,
     });
   } catch (error) {
     console.error('Error registering user:', error);
@@ -143,6 +160,26 @@ router.post('/login', async (req, res) => {
     // Update last login
     await updateUserLastLogin(user.id);
 
+    // Set httpOnly cookies for secure token storage across subdomains
+    const isProduction = process.env.NODE_ENV === 'production';
+    const cookieOptions = {
+      httpOnly: true,
+      secure: isProduction,
+      sameSite: isProduction ? 'none' : 'lax',
+      domain: isProduction ? '.alertachart.com' : undefined,
+      path: '/',
+    };
+
+    res.cookie('accessToken', accessToken, {
+      ...cookieOptions,
+      maxAge: 15 * 60 * 1000, // 15 minutes
+    });
+
+    res.cookie('refreshToken', refreshToken, {
+      ...cookieOptions,
+      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+    });
+
     res.json({
       success: true,
       user: {
@@ -150,10 +187,7 @@ router.post('/login', async (req, res) => {
         email: user.email,
         name: user.name,
       },
-      tokens: {
-        accessToken,
-        refreshToken,
-      },
+      token: accessToken,
     });
   } catch (error) {
     console.error('Error logging in:', error);
@@ -220,10 +254,24 @@ router.post('/refresh', async (req, res) => {
 router.post('/logout', async (req, res) => {
   try {
     const { refreshToken } = req.body;
+    const cookieRefreshToken = req.cookies?.refreshToken;
 
-    if (refreshToken) {
-      await deleteSession(refreshToken);
+    if (refreshToken || cookieRefreshToken) {
+      await deleteSession(refreshToken || cookieRefreshToken);
     }
+
+    // Clear cookies
+    const isProduction = process.env.NODE_ENV === 'production';
+    const cookieOptions = {
+      httpOnly: true,
+      secure: isProduction,
+      sameSite: isProduction ? 'none' : 'lax',
+      domain: isProduction ? '.alertachart.com' : undefined,
+      path: '/',
+    };
+
+    res.clearCookie('accessToken', cookieOptions);
+    res.clearCookie('refreshToken', cookieOptions);
 
     res.json({
       success: true,

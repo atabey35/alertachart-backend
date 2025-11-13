@@ -5,6 +5,7 @@
 
 import express from 'express';
 import cors from 'cors';
+import cookieParser from 'cookie-parser';
 import dotenv from 'dotenv';
 import historicalRouter from './routes/historical.js';
 import tickerRouter from './routes/ticker.js';
@@ -32,15 +33,20 @@ app.use(cors({
     // Allow requests with no origin (mobile apps, Postman, etc.)
     if (!origin) return callback(null, true);
     
-    if (allowedOrigins.includes(origin) || origin.endsWith('.vercel.app')) {
+    // Allow alertachart.com and aggr.alertachart.com
+    if (allowedOrigins.includes(origin) || 
+        origin.endsWith('.vercel.app') ||
+        origin === 'https://alertachart.com' ||
+        origin === 'https://aggr.alertachart.com') {
       callback(null, true);
     } else {
       callback(new Error('Not allowed by CORS'));
     }
   },
-  credentials: true,
+  credentials: true, // Important: allow cookies
 }));
 
+app.use(cookieParser()); // Parse cookies
 app.use(express.json());
 
 // Health check
