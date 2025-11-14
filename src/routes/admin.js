@@ -4,7 +4,7 @@
 
 import express from 'express';
 import { getAllActiveDevices } from '../lib/push/db.js';
-import { sendPushNotifications } from '../lib/push/expo-push.js';
+import { sendPushNotifications } from '../lib/push/unified-push.js';
 
 const router = express.Router();
 

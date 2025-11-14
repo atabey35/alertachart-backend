@@ -5,7 +5,7 @@
 
 import WebSocket from 'ws';
 import { getAllActiveDevices } from './db.js';
-import { sendPriceAlertNotification } from './expo-push.js';
+import { sendPriceAlertNotification } from './unified-push.js';
 
 /**
  * Otomatik fiyat uyarı servisi

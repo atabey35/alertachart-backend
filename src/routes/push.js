@@ -9,7 +9,7 @@ import {
   getDevice, 
   deactivateDevice 
 } from '../lib/push/db.js';
-import { sendTestNotification } from '../lib/push/expo-push.js';
+import { sendTestNotification } from '../lib/push/unified-push.js';
 import { optionalAuth } from '../lib/auth/middleware.js';
 
 const router = express.Router();

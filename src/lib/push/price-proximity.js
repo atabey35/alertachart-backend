@@ -3,7 +3,7 @@ import {
   getActivePriceAlertsBySymbol,
   updatePriceAlertNotification,
 } from './db';
-import { sendPriceAlertNotification } from './expo-push';
+import { sendPriceAlertNotification } from './unified-push.js';
 
 interface PriceUpdate {
   symbol: string;

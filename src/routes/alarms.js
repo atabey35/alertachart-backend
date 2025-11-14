@@ -5,7 +5,7 @@
 import express from 'express';
 import { getAllActiveDevices, getDevice } from '../lib/push/db.js';
 import { getUserDevices } from '../lib/auth/db.js';
-import { sendAlarmNotification } from '../lib/push/expo-push.js';
+import { sendAlarmNotification } from '../lib/push/unified-push.js';
 import { authenticateToken } from '../lib/auth/middleware.js';
 
 const router = express.Router();
