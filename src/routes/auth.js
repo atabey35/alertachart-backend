@@ -4,6 +4,8 @@
 
 import express from 'express';
 import crypto from 'crypto';
+import { OAuth2Client } from 'google-auth-library';
+import appleSignin from 'apple-signin-auth';
 import { hashPassword, verifyPassword } from '../lib/auth/password.js';
 import { generateAccessToken, generateRefreshToken, verifyRefreshToken, getTokenExpiration } from '../lib/auth/jwt.js';
 import {
@@ -18,6 +20,9 @@ import {
 } from '../lib/auth/db.js';
 
 const router = express.Router();
+
+// Google OAuth Client
+const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
 /**
  * POST /api/auth/register
@@ -526,6 +531,223 @@ router.post('/session', async (req, res) => {
     console.error('[Session] Error:', error);
     res.status(500).json({
       error: error.message || 'Failed to create session'
+    });
+  }
+});
+
+/**
+ * POST /api/auth/google-native
+ * Google Sign-In for native Capacitor apps
+ * Verifies Google ID token from native SDK
+ */
+router.post('/google-native', async (req, res) => {
+  try {
+    const { idToken, email, name, imageUrl } = req.body;
+
+    if (!idToken) {
+      return res.status(400).json({
+        error: 'ID token is required'
+      });
+    }
+
+    console.log('[Google Native] Verifying token for:', email);
+
+    // Verify Google ID token
+    let payload;
+    try {
+      const ticket = await googleClient.verifyIdToken({
+        idToken,
+        audience: process.env.GOOGLE_CLIENT_ID,
+      });
+      payload = ticket.getPayload();
+      console.log('[Google Native] Token verified:', payload.email);
+    } catch (error) {
+      console.error('[Google Native] Token verification failed:', error);
+      return res.status(401).json({
+        error: 'Invalid Google token'
+      });
+    }
+
+    const userEmail = payload.email || email;
+    const userName = payload.name || name;
+
+    if (!userEmail) {
+      return res.status(400).json({
+        error: 'No email received from Google'
+      });
+    }
+
+    // Find or create user
+    let user = await getUserByEmail(userEmail);
+    
+    if (!user) {
+      // Create new user with random password (OAuth users don't need password)
+      const randomPassword = crypto.randomBytes(32).toString('hex');
+      const passwordHash = await hashPassword(randomPassword);
+      user = await createUser(userEmail, passwordHash, userName || null);
+      console.log('[Google Native] Created new user:', userEmail);
+    } else {
+      // Update last login
+      await updateUserLastLogin(user.id);
+      console.log('[Google Native] Existing user logged in:', userEmail);
+    }
+
+    // Generate JWT tokens
+    const accessToken = generateAccessToken(user.id, user.email);
+    const refreshToken = generateRefreshToken(user.id, user.email);
+
+    // Create session
+    const expiresAt = getTokenExpiration(process.env.JWT_REFRESH_EXPIRES_IN || '7d');
+    const deviceId = req.body.deviceId || null;
+    const ipAddress = req.ip || req.connection.remoteAddress;
+    const userAgent = req.get('user-agent');
+
+    await createSession(user.id, refreshToken, deviceId, ipAddress, userAgent, expiresAt);
+
+    // Set cookies for web compatibility
+    const isProduction = process.env.NODE_ENV === 'production';
+    const cookieOptions = {
+      httpOnly: true,
+      secure: isProduction,
+      sameSite: isProduction ? 'none' : 'lax',
+      domain: isProduction ? '.alertachart.com' : undefined,
+      path: '/',
+    };
+
+    res.cookie('accessToken', accessToken, {
+      ...cookieOptions,
+      maxAge: 15 * 60 * 1000, // 15 minutes
+    });
+
+    res.cookie('refreshToken', refreshToken, {
+      ...cookieOptions,
+      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+    });
+
+    res.json({
+      success: true,
+      user: {
+        id: user.id,
+        email: user.email,
+        name: user.name,
+      },
+      tokens: {
+        accessToken,
+        refreshToken,
+      },
+    });
+  } catch (error) {
+    console.error('[Google Native] Error:', error);
+    res.status(500).json({
+      error: error.message || 'Failed to authenticate with Google'
+    });
+  }
+});
+
+/**
+ * POST /api/auth/apple-native
+ * Apple Sign-In for native Capacitor apps
+ * Verifies Apple identity token from native SDK
+ */
+router.post('/apple-native', async (req, res) => {
+  try {
+    const { identityToken, authorizationCode, email, givenName, familyName } = req.body;
+
+    if (!identityToken) {
+      return res.status(400).json({
+        error: 'Identity token is required'
+      });
+    }
+
+    console.log('[Apple Native] Verifying token...');
+
+    // Verify Apple identity token
+    let appleUser;
+    try {
+      appleUser = await appleSignin.verifyIdToken(identityToken, {
+        audience: process.env.APPLE_CLIENT_ID || 'com.kriptokirmizi.alerta',
+        ignoreExpiration: false,
+      });
+      console.log('[Apple Native] Token verified:', appleUser.email || email);
+    } catch (error) {
+      console.error('[Apple Native] Token verification failed:', error);
+      return res.status(401).json({
+        error: 'Invalid Apple token'
+      });
+    }
+
+    const userEmail = appleUser.email || email;
+    const userName = givenName && familyName ? `${givenName} ${familyName}` : null;
+
+    if (!userEmail) {
+      return res.status(400).json({
+        error: 'No email received from Apple'
+      });
+    }
+
+    // Find or create user
+    let user = await getUserByEmail(userEmail);
+    
+    if (!user) {
+      // Create new user with random password (OAuth users don't need password)
+      const randomPassword = crypto.randomBytes(32).toString('hex');
+      const passwordHash = await hashPassword(randomPassword);
+      user = await createUser(userEmail, passwordHash, userName || null);
+      console.log('[Apple Native] Created new user:', userEmail);
+    } else {
+      // Update last login
+      await updateUserLastLogin(user.id);
+      console.log('[Apple Native] Existing user logged in:', userEmail);
+    }
+
+    // Generate JWT tokens
+    const accessToken = generateAccessToken(user.id, user.email);
+    const refreshToken = generateRefreshToken(user.id, user.email);
+
+    // Create session
+    const expiresAt = getTokenExpiration(process.env.JWT_REFRESH_EXPIRES_IN || '7d');
+    const deviceId = req.body.deviceId || null;
+    const ipAddress = req.ip || req.connection.remoteAddress;
+    const userAgent = req.get('user-agent');
+
+    await createSession(user.id, refreshToken, deviceId, ipAddress, userAgent, expiresAt);
+
+    // Set cookies for web compatibility
+    const isProduction = process.env.NODE_ENV === 'production';
+    const cookieOptions = {
+      httpOnly: true,
+      secure: isProduction,
+      sameSite: isProduction ? 'none' : 'lax',
+      domain: isProduction ? '.alertachart.com' : undefined,
+      path: '/',
+    };
+
+    res.cookie('accessToken', accessToken, {
+      ...cookieOptions,
+      maxAge: 15 * 60 * 1000, // 15 minutes
+    });
+
+    res.cookie('refreshToken', refreshToken, {
+      ...cookieOptions,
+      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+    });
+
+    res.json({
+      success: true,
+      user: {
+        id: user.id,
+        email: user.email,
+        name: user.name,
+      },
+      tokens: {
+        accessToken,
+        refreshToken,
+      },
+    });
+  } catch (error) {
+    console.error('[Apple Native] Error:', error);
+    res.status(500).json({
+      error: error.message || 'Failed to authenticate with Apple'
     });
   }
 });
