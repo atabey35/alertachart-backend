@@ -78,17 +78,25 @@ export async function sendFCMNotifications(payloads) {
           continue;
         }
 
+        // FCM requires all data values to be strings
+        const fcmData = {};
+        if (payload.data) {
+          for (const [key, value] of Object.entries(payload.data)) {
+            fcmData[key] = String(value);
+          }
+        }
+
         const message = {
           token: token,
           notification: {
             title: payload.title,
             body: payload.body,
           },
-          data: payload.data || {},
+          data: fcmData,
           android: {
             priority: 'high',
             notification: {
-              channelId: payload.channelId || 'default',
+              channelId: payload.data?.channelId || payload.channelId || 'default',
               sound: 'default',
               priority: 'high',
             },

@@ -39,15 +39,18 @@ router.post('/broadcast', async (req, res) => {
     }
 
     // Collect valid push tokens (exclude test tokens)
+    // Support both Expo tokens and FCM tokens
     const tokens = devices
       .map(d => d.expo_push_token)
       .filter(token => {
         if (!token) return false;
         // Exclude any test tokens (case-insensitive)
         const lowerToken = token.toLowerCase();
-        if (lowerToken.includes('test')) return false;
-        // Must be valid Expo token format
-        return token.startsWith('ExponentPushToken[') && token.endsWith(']');
+        if (lowerToken.includes('test') || lowerToken === 'unknown') return false;
+        // Accept both Expo tokens and FCM tokens
+        // Expo: ExponentPushToken[...] or ExpoPushToken[...]
+        // FCM: long string without brackets
+        return token.length > 10; // Simple validation
       });
 
     if (tokens.length === 0) {
@@ -61,20 +64,24 @@ router.post('/broadcast', async (req, res) => {
     }
 
     console.log(`📤 Broadcasting to ${tokens.length} device(s)...`);
+    console.log(`   First token example: ${tokens[0].substring(0, 50)}...`);
 
-    // Send push notification to all
-    const success = await sendPushNotifications([{
-      to: tokens,
+    // Prepare payloads for each token (unified-push will detect Expo vs FCM)
+    const payloads = tokens.map(token => ({
+      to: token,
       title: title,
       body: message,
       data: {
         type: 'admin_broadcast',
-        timestamp: Date.now(),
+        timestamp: Date.now().toString(),
+        channelId: 'admin-notifications',
       },
       sound: 'default',
       priority: 'high',
-      channelId: 'default',  // Android notification channel
-    }]);
+    }));
+
+    // Send push notifications (unified-push handles Expo + FCM)
+    const success = await sendPushNotifications(payloads);
 
     if (success) {
       console.log(`✅ Broadcast sent to ${tokens.length} devices`);

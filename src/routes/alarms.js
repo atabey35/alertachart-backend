@@ -96,15 +96,18 @@ router.post('/notify', authenticateToken, async (req, res) => {
     }
 
     // Collect valid push tokens (exclude test tokens)
+    // Support both Expo tokens and FCM tokens
     const tokens = devices
       .map(d => d.expo_push_token)
       .filter(token => {
         if (!token) return false;
         // Exclude any test tokens (case-insensitive)
         const lowerToken = token.toLowerCase();
-        if (lowerToken.includes('test')) return false;
-        // Must be valid Expo token format
-        return token.startsWith('ExponentPushToken[') && token.endsWith(']');
+        if (lowerToken.includes('test') || lowerToken === 'unknown') return false;
+        // Accept both Expo tokens and FCM tokens
+        // Expo: ExponentPushToken[...] or ExpoPushToken[...]
+        // FCM: long string without brackets
+        return token.length > 10; // Simple validation
       });
 
     if (tokens.length === 0) {

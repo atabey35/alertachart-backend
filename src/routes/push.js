@@ -49,7 +49,9 @@ router.post('/register', optionalAuth, async (req, res) => {
       pushToken,
       platform,
       appVersion || '1.0.0',
-      userId
+      userId,
+      model || 'Unknown',
+      osVersion || 'Unknown'
     );
 
     console.log(`✅ Device registered: ${deviceId} (${platform})${userId ? ` for user ${userId}` : ''}`);

@@ -30,11 +30,24 @@ export async function initPushDatabase() {
         expo_push_token VARCHAR(500) NOT NULL,
         platform VARCHAR(20) NOT NULL,
         app_version VARCHAR(50),
+        user_id INTEGER,
+        model VARCHAR(100),
+        os_version VARCHAR(50),
         is_active BOOLEAN DEFAULT true,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `;
+    
+    // Add new columns if they don't exist (migration)
+    try {
+      await sql`ALTER TABLE devices ADD COLUMN IF NOT EXISTS user_id INTEGER`;
+      await sql`ALTER TABLE devices ADD COLUMN IF NOT EXISTS model VARCHAR(100)`;
+      await sql`ALTER TABLE devices ADD COLUMN IF NOT EXISTS os_version VARCHAR(50)`;
+      console.log('✅ Devices table migration completed');
+    } catch (migrationError) {
+      console.log('ℹ️  Devices table already has new columns');
+    }
 
     // Price alerts table
     await sql`
@@ -88,17 +101,19 @@ export async function initPushDatabase() {
 }
 
 // Device operations
-export async function upsertDevice(deviceId, expoPushToken, platform, appVersion, userId = null) {
+export async function upsertDevice(deviceId, expoPushToken, platform, appVersion, userId = null, model = null, osVersion = null) {
   const sql = getSql();
   const result = await sql`
-    INSERT INTO devices (device_id, expo_push_token, platform, app_version, user_id, updated_at)
-    VALUES (${deviceId}, ${expoPushToken}, ${platform}, ${appVersion}, ${userId}, CURRENT_TIMESTAMP)
+    INSERT INTO devices (device_id, expo_push_token, platform, app_version, user_id, model, os_version, updated_at)
+    VALUES (${deviceId}, ${expoPushToken}, ${platform}, ${appVersion}, ${userId}, ${model}, ${osVersion}, CURRENT_TIMESTAMP)
     ON CONFLICT (device_id)
     DO UPDATE SET
       expo_push_token = ${expoPushToken},
       platform = ${platform},
       app_version = ${appVersion},
       user_id = COALESCE(${userId}, devices.user_id),
+      model = ${model},
+      os_version = ${osVersion},
       is_active = true,
       updated_at = CURRENT_TIMESTAMP
     RETURNING *
