@@ -355,10 +355,18 @@ export class AutoPriceAlertService {
       }
 
       // Push token'ları topla (sadece geçerli ve benzersiz olanlar)
+      // Support both Expo tokens and FCM tokens
       const uniqueTokens = new Set();
       devices.forEach(d => {
         const token = d.expo_push_token;
-        if (token && !token.includes('test-token')) {
+        if (!token) return;
+        
+        // Exclude test tokens
+        const lowerToken = token.toLowerCase();
+        if (lowerToken.includes('test') || lowerToken === 'unknown') return;
+        
+        // Accept both Expo and FCM tokens (length validation)
+        if (token.length > 10) {
           uniqueTokens.add(token);
         }
       });
