@@ -115,12 +115,12 @@ export async function initAuthDatabase() {
 }
 
 // User operations
-export async function createUser(email, passwordHash, name = null) {
+export async function createUser(email, passwordHash, name = null, provider = null, providerUserId = null) {
   const sql = getSql();
   const result = await sql`
-    INSERT INTO users (email, password_hash, name)
-    VALUES (${email}, ${passwordHash}, ${name})
-    RETURNING id, email, name, created_at
+    INSERT INTO users (email, password_hash, name, provider, provider_user_id)
+    VALUES (${email}, ${passwordHash}, ${name}, ${provider}, ${providerUserId})
+    RETURNING id, email, name, provider, provider_user_id, created_at
   `;
   return result[0];
 }
@@ -137,7 +137,7 @@ export async function getUserByEmail(email) {
 export async function getUserById(userId) {
   const sql = getSql();
   const result = await sql`
-    SELECT id, email, name, created_at, last_login_at, is_active
+    SELECT id, email, name, provider, provider_user_id, plan, expiry_date, created_at, last_login_at, is_active
     FROM users
     WHERE id = ${userId} AND is_active = true
   `;

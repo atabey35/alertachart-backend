@@ -322,6 +322,9 @@ router.get('/me', async (req, res) => {
         id: user.id,
         email: user.email,
         name: user.name,
+        provider: user.provider,
+        plan: user.plan,
+        expiryDate: user.expiry_date,
         createdAt: user.created_at,
         lastLoginAt: user.last_login_at,
       },
@@ -584,7 +587,7 @@ router.post('/google-native', async (req, res) => {
       // Create new user with random password (OAuth users don't need password)
       const randomPassword = crypto.randomBytes(32).toString('hex');
       const passwordHash = await hashPassword(randomPassword);
-      user = await createUser(userEmail, passwordHash, userName || null);
+      user = await createUser(userEmail, passwordHash, userName || null, 'google', payload.sub);
       console.log('[Google Native] Created new user:', userEmail);
     } else {
       // Update last login
@@ -692,7 +695,7 @@ router.post('/apple-native', async (req, res) => {
       // Create new user with random password (OAuth users don't need password)
       const randomPassword = crypto.randomBytes(32).toString('hex');
       const passwordHash = await hashPassword(randomPassword);
-      user = await createUser(userEmail, passwordHash, userName || null);
+      user = await createUser(userEmail, passwordHash, userName || null, 'apple', appleUser.sub);
       console.log('[Apple Native] Created new user:', userEmail);
     } else {
       // Update last login
