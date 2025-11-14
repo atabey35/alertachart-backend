@@ -3,6 +3,7 @@
  */
 
 import express from 'express';
+import crypto from 'crypto';
 import { hashPassword, verifyPassword } from '../lib/auth/password.js';
 import { generateAccessToken, generateRefreshToken, verifyRefreshToken, getTokenExpiration } from '../lib/auth/jwt.js';
 import {
@@ -324,6 +325,207 @@ router.get('/me', async (req, res) => {
     console.error('Error getting user info:', error);
     res.status(401).json({
       error: 'Invalid or expired token'
+    });
+  }
+});
+
+/**
+ * POST /api/auth/google/mobile
+ * Google OAuth mobile app login
+ * Receives authorization code from mobile app and exchanges it for tokens
+ */
+router.post('/google/mobile', async (req, res) => {
+  try {
+    const { code, redirectUri } = req.body;
+
+    if (!code || !redirectUri) {
+      return res.status(400).json({
+        error: 'Authorization code and redirect URI are required'
+      });
+    }
+
+    // Exchange authorization code for access token from Google
+    const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
+    const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
+
+    if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET) {
+      console.error('Google OAuth credentials not configured');
+      return res.status(500).json({
+        error: 'Google OAuth not configured'
+      });
+    }
+
+    // Exchange code for tokens
+    const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        code,
+        client_id: GOOGLE_CLIENT_ID,
+        client_secret: GOOGLE_CLIENT_SECRET,
+        redirect_uri: redirectUri,
+        grant_type: 'authorization_code',
+      }),
+    });
+
+    if (!tokenResponse.ok) {
+      const errorText = await tokenResponse.text();
+      console.error('[Google OAuth] Token exchange failed:', errorText);
+      return res.status(401).json({
+        error: 'Failed to exchange authorization code'
+      });
+    }
+
+    const tokenData = await tokenResponse.json();
+    const { access_token, id_token } = tokenData;
+
+    if (!access_token) {
+      return res.status(401).json({
+        error: 'No access token received from Google'
+      });
+    }
+
+    // Get user info from Google
+    const userInfoResponse = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
+      headers: {
+        'Authorization': `Bearer ${access_token}`
+      },
+    });
+
+    if (!userInfoResponse.ok) {
+      console.error('[Google OAuth] Failed to get user info');
+      return res.status(401).json({
+        error: 'Failed to get user info from Google'
+      });
+    }
+
+    const googleUser = await userInfoResponse.json();
+    const { email, name, id: googleId, picture } = googleUser;
+
+    if (!email) {
+      return res.status(400).json({
+        error: 'No email received from Google'
+      });
+    }
+
+    // Find or create user in database
+    let user = await getUserByEmail(email);
+    
+    if (!user) {
+      // Create new user with Google provider
+      // Note: password_hash is required, we'll set a random hash for OAuth users
+      const { hashPassword } = await import('../lib/auth/password.js');
+      const randomPassword = crypto.randomBytes(32).toString('hex');
+      const passwordHash = await hashPassword(randomPassword);
+      
+      // Create user (assuming createUser accepts provider info)
+      // For now, we'll just create with email and password
+      user = await createUser(email, passwordHash, name || null);
+      console.log('[Google OAuth] Created new user:', email);
+    } else {
+      // Update last login
+      await updateUserLastLogin(user.id);
+    }
+
+    // Generate JWT tokens
+    const accessToken = generateAccessToken(user.id, user.email);
+    const refreshToken = generateRefreshToken(user.id, user.email);
+
+    // Create session
+    const expiresAt = getTokenExpiration(process.env.JWT_REFRESH_EXPIRES_IN || '7d');
+    const deviceId = req.body.deviceId || null;
+    const ipAddress = req.ip || req.connection.remoteAddress;
+    const userAgent = req.get('user-agent');
+
+    await createSession(user.id, refreshToken, deviceId, ipAddress, userAgent, expiresAt);
+
+    res.json({
+      success: true,
+      user: {
+        id: user.id,
+        email: user.email,
+        name: user.name,
+      },
+      token: accessToken,
+    });
+  } catch (error) {
+    console.error('[Google OAuth] Error:', error);
+    res.status(500).json({
+      error: error.message || 'Failed to authenticate with Google'
+    });
+  }
+});
+
+/**
+ * POST /api/auth/session
+ * Create session from token (for WebView)
+ * Converts native app token to session cookie
+ */
+router.post('/session', async (req, res) => {
+  try {
+    const token = req.body.token || req.headers['authorization']?.replace('Bearer ', '');
+
+    if (!token) {
+      return res.status(400).json({
+        error: 'Token is required'
+      });
+    }
+
+    // Verify token
+    const { verifyAccessToken } = await import('../lib/auth/jwt.js');
+    let decoded;
+    try {
+      decoded = verifyAccessToken(token);
+    } catch (error) {
+      return res.status(401).json({
+        error: 'Invalid or expired token'
+      });
+    }
+
+    // Get user
+    const user = await getUserById(decoded.userId);
+    if (!user) {
+      return res.status(404).json({
+        error: 'User not found'
+      });
+    }
+
+    // Set httpOnly cookies for secure token storage
+    const isProduction = process.env.NODE_ENV === 'production';
+    const cookieOptions = {
+      httpOnly: true,
+      secure: isProduction,
+      sameSite: isProduction ? 'none' : 'lax',
+      domain: isProduction ? '.alertachart.com' : undefined,
+      path: '/',
+    };
+
+    // Generate new access token for cookie (optional, can reuse existing)
+    const accessToken = generateAccessToken(user.id, user.email);
+    const refreshToken = generateRefreshToken(user.id, user.email);
+
+    res.cookie('accessToken', accessToken, {
+      ...cookieOptions,
+      maxAge: 15 * 60 * 1000, // 15 minutes
+    });
+
+    res.cookie('refreshToken', refreshToken, {
+      ...cookieOptions,
+      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+    });
+
+    res.json({
+      success: true,
+      user: {
+        id: user.id,
+        email: user.email,
+        name: user.name,
+      },
+    });
+  } catch (error) {
+    console.error('[Session] Error:', error);
+    res.status(500).json({
+      error: error.message || 'Failed to create session'
     });
   }
 });
