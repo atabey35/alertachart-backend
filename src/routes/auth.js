@@ -294,11 +294,17 @@ router.post('/logout', async (req, res) => {
 /**
  * GET /api/auth/me
  * Get current user info
+ * Supports both Cookie-based and Authorization header authentication
  */
 router.get('/me', async (req, res) => {
   try {
-    const authHeader = req.headers['authorization'];
-    const token = authHeader && authHeader.split(' ')[1];
+    // Try to get token from cookies first (for web/Capacitor), then from Authorization header (for native)
+    let token = req.cookies?.accessToken;
+    
+    if (!token) {
+      const authHeader = req.headers['authorization'];
+      token = authHeader && authHeader.split(' ')[1];
+    }
 
     if (!token) {
       return res.status(401).json({
