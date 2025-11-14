@@ -139,6 +139,16 @@ export async function deactivateDevice(deviceId) {
   `;
 }
 
+export async function deleteDeviceByToken(token) {
+  const sql = getSql();
+  const result = await sql`
+    DELETE FROM devices
+    WHERE expo_push_token = ${token}
+    RETURNING *
+  `;
+  return result[0];
+}
+
 export async function getAllActiveDevices() {
   const sql = getSql();
   return await sql`

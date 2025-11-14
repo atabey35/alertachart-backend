@@ -7,6 +7,7 @@ import admin from 'firebase-admin';
 import { readFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { deleteDeviceByToken } from './db.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -137,13 +138,28 @@ export async function sendFCMNotifications(payloads) {
     console.log(`✅ Sent ${messages.length} FCM notifications`);
     console.log(`Success: ${responses.successCount}, Failures: ${responses.failureCount}`);
 
-    // Log errors
+    // Log errors and clean up invalid tokens
     if (responses.failureCount > 0) {
-      responses.responses.forEach((resp, idx) => {
+      for (let idx = 0; idx < responses.responses.length; idx++) {
+        const resp = responses.responses[idx];
         if (!resp.success) {
           console.error(`FCM Error for message ${idx}:`, resp.error);
+          
+          // Clean up invalid tokens from database
+          const errorCode = resp.error?.code;
+          if (errorCode === 'messaging/registration-token-not-registered' || 
+              errorCode === 'messaging/invalid-registration-token') {
+            const invalidToken = messages[idx].token;
+            console.log(`🗑️  Removing invalid FCM token: ${invalidToken.substring(0, 30)}...`);
+            try {
+              await deleteDeviceByToken(invalidToken);
+              console.log(`✅ Invalid token removed from database`);
+            } catch (deleteError) {
+              console.error(`Failed to delete invalid token:`, deleteError);
+            }
+          }
         }
-      });
+      }
     }
 
     return responses.failureCount === 0;
