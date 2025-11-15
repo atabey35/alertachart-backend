@@ -4,7 +4,7 @@
 
 import express from 'express';
 import { getAllActiveDevices, getDevice } from '../lib/push/db.js';
-import { getUserDevices } from '../lib/auth/db.js';
+import { getUserDevices, getUserById } from '../lib/auth/db.js';
 import { sendAlarmNotification } from '../lib/push/unified-push.js';
 import { optionalAuth } from '../lib/auth/middleware.js';
 
@@ -47,10 +47,56 @@ router.post('/notify', optionalAuth, async (req, res) => {
       const targetDevice = await getDevice(deviceId);
       
       if (targetDevice && targetDevice.expo_push_token) {
+        // 🔒 PREMIUM CHECK: Check if user has premium access
+        // CRITICAL: If user_id is null, we cannot verify premium status, so skip notification
+        if (!targetDevice.user_id) {
+          console.log(`⚠️ Device ${deviceId} not linked to user (user_id is null) - Cannot verify premium status, skipping notification`);
+          console.log(`   💡 User needs to login and link device via /api/devices/link`);
+          return res.json({ 
+            success: true, 
+            message: 'Device not linked to user - cannot verify premium status',
+            sent: 0,
+            skipped: true,
+            reason: 'device_not_linked',
+          });
+        }
+        
+        // User is linked, check premium status
+        const user = await getUserById(targetDevice.user_id);
+        if (!user) {
+          console.log(`⚠️ User ${targetDevice.user_id} not found - Skipping notification`);
+          return res.json({ 
+            success: true, 
+            message: 'User not found',
+            sent: 0,
+            skipped: true,
+          });
+        }
+        
+        // Check premium/trial status
+        const isPremium = user.plan === 'premium' && (!user.expiry_date || new Date(user.expiry_date) > new Date());
+        const isTrial = user.plan === 'free' && user.trial_started_at && user.trial_ended_at && 
+                       new Date() >= new Date(user.trial_started_at) && 
+                       new Date() < new Date(user.trial_ended_at);
+        const hasPremiumAccess = isPremium || isTrial;
+        
+        if (!hasPremiumAccess) {
+          console.log(`🚫 Free user ${targetDevice.user_id} (${user.email}) - Skipping automatic price tracking notification (local alarms still work)`);
+          return res.json({ 
+            success: true, 
+            message: 'Free user - automatic notifications disabled',
+            sent: 0,
+            skipped: true,
+            reason: 'free_user',
+          });
+        }
+        
+        console.log(`✅ Premium/Trial user ${targetDevice.user_id} (${user.email}) - Sending notification`);
+        
         devices = [targetDevice];
         targetDeviceInfo = `Device ${targetDevice.device_id} (by deviceId)`;
         console.log(`✅ Found device by deviceId: ${deviceId} - Sending notification`);
-        console.log(`   Device details: platform=${targetDevice.platform}, user_id=${targetDevice.user_id || 'none'}, token=${targetDevice.expo_push_token.substring(0, 30)}...`);
+        console.log(`   Device details: platform=${targetDevice.platform}, user_id=${targetDevice.user_id}, email=${user.email}, plan=${user.plan}, token=${targetDevice.expo_push_token.substring(0, 30)}...`);
       } else {
         console.log(`❌ Device ${deviceId} not found or has no push token`);
         return res.json({ 
