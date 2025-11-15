@@ -66,10 +66,11 @@ router.post('/register-native', async (req, res) => {
  * POST /api/devices/link
  * Link device to user - AUTH GEREKTİRİR
  * Login sonrası çağrılır, deviceId'yi mevcut kullanıcıya bağlar
+ * Device yoksa otomatik olarak oluşturur (pushToken varsa tam kayıt, yoksa minimal kayıt)
  */
 router.post('/link', authenticateToken, async (req, res) => {
   try {
-    const { deviceId } = req.body;
+    const { deviceId, pushToken, platform } = req.body;
 
     // Validation
     if (!deviceId) {
@@ -81,46 +82,83 @@ router.post('/link', authenticateToken, async (req, res) => {
     const userId = req.user.userId; // From authenticateToken middleware
     console.log(`[Device Link] Linking device ${deviceId} to user ${userId}`);
 
+    // Initialize database (first time)
+    await initPushDatabase();
+
     // Check if device exists
-    const device = await getDevice(deviceId);
-    if (!device) {
-      return res.status(404).json({
-        error: 'Device not found'
-      });
-    }
-
-    // Update device with userId
-    const { neon } = await import('@neondatabase/serverless');
-    if (!process.env.DATABASE_URL) {
-      throw new Error('DATABASE_URL environment variable is not set');
-    }
-    const sql = neon(process.env.DATABASE_URL);
+    let device = await getDevice(deviceId);
     
-    const result = await sql`
-      UPDATE devices
-      SET user_id = ${userId},
-          updated_at = CURRENT_TIMESTAMP
-      WHERE device_id = ${deviceId}
-      RETURNING *
-    `;
+    // 🔥 CRITICAL: If device doesn't exist, create it automatically
+    if (!device) {
+      console.log(`[Device Link] Device ${deviceId} not found, creating automatically...`);
+      
+      // Determine platform from request or default to 'ios'
+      const devicePlatform = platform || req.body.platform || 'ios';
+      
+      // Use pushToken if provided, otherwise use placeholder (device will be updated later when push token is available)
+      const devicePushToken = pushToken || `placeholder-${deviceId}-${Date.now()}`;
+      
+      // Create device with minimal info (will be updated later if pushToken is provided)
+      device = await upsertDevice(
+        deviceId,
+        devicePushToken,
+        devicePlatform,
+        '1.0.0', // Default app version
+        userId, // Link to user immediately
+        null, // model
+        null  // osVersion
+      );
+      
+      console.log(`✅ Device ${deviceId} created automatically and linked to user ${userId}`);
+    } else {
+      // Device exists, just update userId
+      const { neon } = await import('@neondatabase/serverless');
+      if (!process.env.DATABASE_URL) {
+        throw new Error('DATABASE_URL environment variable is not set');
+      }
+      const sql = neon(process.env.DATABASE_URL);
+      
+      // Update pushToken if provided
+      if (pushToken && pushToken !== device.expo_push_token) {
+        console.log(`[Device Link] Updating push token for device ${deviceId}`);
+        const updateResult = await sql`
+          UPDATE devices
+          SET user_id = ${userId},
+              expo_push_token = ${pushToken},
+              updated_at = CURRENT_TIMESTAMP
+          WHERE device_id = ${deviceId}
+          RETURNING *
+        `;
+        device = updateResult[0];
+      } else {
+        // Just update userId
+        const updateResult = await sql`
+          UPDATE devices
+          SET user_id = ${userId},
+              updated_at = CURRENT_TIMESTAMP
+          WHERE device_id = ${deviceId}
+          RETURNING *
+        `;
+        device = updateResult[0];
+      }
 
-    const updatedDevice = result[0];
+      if (!device) {
+        return res.status(404).json({
+          error: 'Device not found after update'
+        });
+      }
 
-    if (!updatedDevice) {
-      return res.status(404).json({
-        error: 'Device not found'
-      });
+      console.log(`✅ Device ${deviceId} linked to user ${userId}`);
     }
-
-    console.log(`✅ Device ${deviceId} linked to user ${userId}`);
 
     res.json({
       success: true,
       device: {
-        deviceId: updatedDevice.device_id,
-        platform: updatedDevice.platform,
-        userId: updatedDevice.user_id,
-        linkedAt: updatedDevice.updated_at,
+        deviceId: device.device_id,
+        platform: device.platform,
+        userId: device.user_id,
+        linkedAt: device.updated_at,
+        created: !device.expo_push_token?.startsWith('placeholder'), // Indicates if device was just created
       },
     });
   } catch (error) {
