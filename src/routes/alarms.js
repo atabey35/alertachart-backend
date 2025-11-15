@@ -74,11 +74,30 @@ router.post('/notify', optionalAuth, async (req, res) => {
         }
         
         // Check premium/trial status
+        // Premium: plan === 'premium' AND (no expiry_date OR expiry_date is in the future)
         const isPremium = user.plan === 'premium' && (!user.expiry_date || new Date(user.expiry_date) > new Date());
-        const isTrial = user.plan === 'free' && user.trial_started_at && user.trial_ended_at && 
-                       new Date() >= new Date(user.trial_started_at) && 
-                       new Date() < new Date(user.trial_ended_at);
+        
+        // Trial: plan === 'free' AND trial is active (between trial_started_at and trial_ended_at)
+        let isTrial = false;
+        if (user.plan === 'free' && user.trial_started_at && user.trial_ended_at) {
+          const trialStart = new Date(user.trial_started_at);
+          const trialEnd = new Date(user.trial_ended_at);
+          const now = new Date();
+          isTrial = now >= trialStart && now < trialEnd;
+        }
+        
         const hasPremiumAccess = isPremium || isTrial;
+        
+        // 🔍 DEBUG: Log premium status check
+        console.log(`🔍 Premium check for user ${targetDevice.user_id} (${user.email}):`, {
+          plan: user.plan,
+          expiry_date: user.expiry_date,
+          trial_started_at: user.trial_started_at,
+          trial_ended_at: user.trial_ended_at,
+          isPremium,
+          isTrial,
+          hasPremiumAccess,
+        });
         
         if (!hasPremiumAccess) {
           console.log(`🚫 Free user ${targetDevice.user_id} (${user.email}) - Skipping automatic price tracking notification (local alarms still work)`);
