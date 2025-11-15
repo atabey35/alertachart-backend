@@ -74,14 +74,35 @@ router.post('/notify', optionalAuth, async (req, res) => {
         }
         
         // Check premium/trial status
+        // Use the same logic as frontend utils/premium.ts for consistency
+        
         // Premium: plan === 'premium' AND (no expiry_date OR expiry_date is in the future)
-        const isPremium = user.plan === 'premium' && (!user.expiry_date || new Date(user.expiry_date) > new Date());
+        let isPremium = false;
+        if (user.plan === 'premium') {
+          if (user.expiry_date) {
+            const expiry = new Date(user.expiry_date);
+            const now = new Date();
+            isPremium = expiry > now;
+          } else {
+            // No expiry_date means lifetime premium or new premium user
+            isPremium = true;
+          }
+        }
         
         // Trial: plan === 'free' AND trial is active (between trial_started_at and trial_ended_at)
         let isTrial = false;
-        if (user.plan === 'free' && user.trial_started_at && user.trial_ended_at) {
+        if (user.plan === 'free' && user.trial_started_at) {
           const trialStart = new Date(user.trial_started_at);
-          const trialEnd = new Date(user.trial_ended_at);
+          let trialEnd;
+          
+          if (user.trial_ended_at) {
+            trialEnd = new Date(user.trial_ended_at);
+          } else {
+            // Calculate trial end (3 days from start)
+            trialEnd = new Date(trialStart);
+            trialEnd.setDate(trialEnd.getDate() + 3);
+          }
+          
           const now = new Date();
           isTrial = now >= trialStart && now < trialEnd;
         }
@@ -92,8 +113,13 @@ router.post('/notify', optionalAuth, async (req, res) => {
         console.log(`🔍 Premium check for user ${targetDevice.user_id} (${user.email}):`, {
           plan: user.plan,
           expiry_date: user.expiry_date,
+          expiry_date_parsed: user.expiry_date ? new Date(user.expiry_date).toISOString() : null,
+          expiry_date_valid: user.expiry_date ? (new Date(user.expiry_date) > new Date()) : 'N/A (lifetime)',
           trial_started_at: user.trial_started_at,
           trial_ended_at: user.trial_ended_at,
+          trial_started_parsed: user.trial_started_at ? new Date(user.trial_started_at).toISOString() : null,
+          trial_ended_parsed: user.trial_ended_at ? new Date(user.trial_ended_at).toISOString() : null,
+          now: new Date().toISOString(),
           isPremium,
           isTrial,
           hasPremiumAccess,
