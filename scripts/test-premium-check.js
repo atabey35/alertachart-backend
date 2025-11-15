@@ -40,12 +40,28 @@ async function testPremiumCheck(email) {
     console.log(JSON.stringify(user, null, 2));
     console.log('');
 
-    // Get user's devices
+    // Get user's devices (both linked and unlinked)
     const devices = await sql`
-      SELECT device_id, platform, user_id, is_active, created_at, updated_at
+      SELECT device_id, platform, user_id, is_active, expo_push_token, created_at, updated_at
       FROM devices
       WHERE user_id = ${user.id} AND is_active = true
     `;
+    
+    // Also check for devices that might not be linked yet (by device_id pattern or recent creation)
+    const allDevices = await sql`
+      SELECT device_id, platform, user_id, is_active, expo_push_token, created_at, updated_at
+      FROM devices
+      WHERE is_active = true
+      ORDER BY created_at DESC
+      LIMIT 10
+    `;
+    
+    console.log(`\n📱 All Recent Devices (last 10):`);
+    allDevices.forEach((device, index) => {
+      const isLinked = device.user_id === user.id;
+      const tokenPreview = device.expo_push_token ? `${device.expo_push_token.substring(0, 30)}...` : 'NO TOKEN';
+      console.log(`  ${index + 1}. ${device.device_id} (${device.platform}) - user_id: ${device.user_id || 'NULL'} ${isLinked ? '✅ LINKED' : '❌ NOT LINKED'} - token: ${tokenPreview}`);
+    });
 
     console.log(`📱 Devices (${devices.length}):`);
     devices.forEach((device, index) => {
