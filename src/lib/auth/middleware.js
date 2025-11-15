@@ -32,10 +32,16 @@ export function authenticateToken(req, res, next) {
 
 /**
  * Optional authentication - doesn't fail if no token
+ * Supports both Cookie-based (for web/Capacitor) and Authorization header (for native)
  */
 export function optionalAuth(req, res, next) {
-  const authHeader = req.headers['authorization'];
-  const token = authHeader && authHeader.split(' ')[1];
+  // Try to get token from cookies first (for web/Capacitor), then from Authorization header (for native)
+  let token = req.cookies?.accessToken;
+  
+  if (!token) {
+    const authHeader = req.headers['authorization'];
+    token = authHeader && authHeader.split(' ')[1]; // Bearer TOKEN
+  }
 
   if (token) {
     try {

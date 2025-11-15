@@ -14,6 +14,7 @@ import alertsRouter from './routes/alerts.js';
 import alarmsRouter from './routes/alarms.js';
 import adminRouter from './routes/admin.js';
 import authRouter from './routes/auth.js';
+import devicesRouter from './routes/devices.js';
 import { getAutoPriceAlertService } from './lib/push/auto-price-alerts.js';
 import { initPushDatabase } from './lib/push/db.js';
 import { initAuthDatabase } from './lib/auth/db.js';
@@ -67,6 +68,7 @@ app.use('/api/alerts', alertsRouter);
 app.use('/api/alarms', alarmsRouter);
 app.use('/api/admin', adminRouter);
 app.use('/api/auth', authRouter);
+app.use('/api/devices', devicesRouter);
 
 // Error handler
 app.use((err, req, res, next) => {
