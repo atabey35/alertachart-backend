@@ -137,7 +137,7 @@ export async function getUserByEmail(email) {
 export async function getUserById(userId) {
   const sql = getSql();
   const result = await sql`
-    SELECT id, email, name, provider, provider_user_id, plan, expiry_date, created_at, last_login_at, is_active
+    SELECT id, email, name, provider, provider_user_id, plan, expiry_date, trial_started_at, trial_ended_at, subscription_started_at, created_at, last_login_at, is_active
     FROM users
     WHERE id = ${userId} AND is_active = true
   `;

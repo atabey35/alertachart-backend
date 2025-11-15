@@ -112,13 +112,13 @@ router.post('/test', async (req, res) => {
 
     // If deviceId provided, get token from database
     if (deviceId && !token) {
-      const device = await getDevice(deviceId);
+    const device = await getDevice(deviceId);
 
-      if (!device) {
-        return res.status(404).json({
-          error: 'Device not found or inactive'
-        });
-      }
+    if (!device) {
+      return res.status(404).json({
+        error: 'Device not found or inactive'
+      });
+    }
 
       pushToken = device.expo_push_token;
     }

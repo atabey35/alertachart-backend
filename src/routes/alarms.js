@@ -47,101 +47,111 @@ router.post('/notify', optionalAuth, async (req, res) => {
       const targetDevice = await getDevice(deviceId);
       
       if (targetDevice && targetDevice.expo_push_token) {
-        // 🔒 PREMIUM CHECK: Check if user has premium access
-        // CRITICAL: If user_id is null, we cannot verify premium status, so skip notification
-        if (!targetDevice.user_id) {
-          console.log(`⚠️ Device ${deviceId} not linked to user (user_id is null) - Cannot verify premium status, skipping notification`);
-          console.log(`   💡 User needs to login and link device via /api/devices/link`);
-          return res.json({ 
-            success: true, 
-            message: 'Device not linked to user - cannot verify premium status',
-            sent: 0,
-            skipped: true,
-            reason: 'device_not_linked',
-          });
-        }
+        // 🔒 PREMIUM CHECK: Sadece otomatik price tracking bildirimleri için kontrol yap
+        // Local alarmlar (isLocalAlarm: true) için premium kontrolü yapma - free kullanıcılar da alabilmeli
+        const isLocalAlarm = req.body.isLocalAlarm === true;
         
-        // User is linked, check premium status
-        const user = await getUserById(targetDevice.user_id);
-        if (!user) {
-          console.log(`⚠️ User ${targetDevice.user_id} not found - Skipping notification`);
-          return res.json({ 
-            success: true, 
-            message: 'User not found',
-            sent: 0,
-            skipped: true,
-          });
-        }
-        
-        // Check premium/trial status
-        // Use the same logic as frontend utils/premium.ts for consistency
-        
-        // Premium: plan === 'premium' AND (no expiry_date OR expiry_date is in the future)
-        let isPremium = false;
-        if (user.plan === 'premium') {
-          if (user.expiry_date) {
-            const expiry = new Date(user.expiry_date);
+        if (!isLocalAlarm) {
+          // Otomatik price tracking bildirimi - premium kontrolü yap
+          // CRITICAL: If user_id is null, we cannot verify premium status, so skip notification
+          if (!targetDevice.user_id) {
+            console.log(`⚠️ Device ${deviceId} not linked to user (user_id is null) - Cannot verify premium status, skipping notification`);
+            console.log(`   💡 User needs to login and link device via /api/devices/link`);
+            return res.json({ 
+              success: true, 
+              message: 'Device not linked to user - cannot verify premium status',
+              sent: 0,
+              skipped: true,
+              reason: 'device_not_linked',
+            });
+          }
+          
+          // User is linked, check premium status
+          const user = await getUserById(targetDevice.user_id);
+          if (!user) {
+            console.log(`⚠️ User ${targetDevice.user_id} not found - Skipping notification`);
+            return res.json({ 
+              success: true, 
+              message: 'User not found',
+              sent: 0,
+              skipped: true,
+            });
+          }
+          
+          // Check premium/trial status
+          // Use the same logic as frontend utils/premium.ts for consistency
+          
+          // Premium: plan === 'premium' AND (no expiry_date OR expiry_date is in the future)
+          let isPremium = false;
+          if (user.plan === 'premium') {
+            if (user.expiry_date) {
+              const expiry = new Date(user.expiry_date);
+              const now = new Date();
+              isPremium = expiry > now;
+            } else {
+              // No expiry_date means lifetime premium or new premium user
+              isPremium = true;
+            }
+          }
+          
+          // Trial: plan === 'free' AND trial is active (between trial_started_at and trial_ended_at)
+          let isTrial = false;
+          if (user.plan === 'free' && user.trial_started_at) {
+            const trialStart = new Date(user.trial_started_at);
+            let trialEnd;
+            
+            if (user.trial_ended_at) {
+              trialEnd = new Date(user.trial_ended_at);
+            } else {
+              // Calculate trial end (3 days from start)
+              trialEnd = new Date(trialStart);
+              trialEnd.setDate(trialEnd.getDate() + 3);
+            }
+            
             const now = new Date();
-            isPremium = expiry > now;
-          } else {
-            // No expiry_date means lifetime premium or new premium user
-            isPremium = true;
-          }
-        }
-        
-        // Trial: plan === 'free' AND trial is active (between trial_started_at and trial_ended_at)
-        let isTrial = false;
-        if (user.plan === 'free' && user.trial_started_at) {
-          const trialStart = new Date(user.trial_started_at);
-          let trialEnd;
-          
-          if (user.trial_ended_at) {
-            trialEnd = new Date(user.trial_ended_at);
-          } else {
-            // Calculate trial end (3 days from start)
-            trialEnd = new Date(trialStart);
-            trialEnd.setDate(trialEnd.getDate() + 3);
+            isTrial = now >= trialStart && now < trialEnd;
           }
           
-          const now = new Date();
-          isTrial = now >= trialStart && now < trialEnd;
-        }
-        
-        const hasPremiumAccess = isPremium || isTrial;
-        
-        // 🔍 DEBUG: Log premium status check
-        console.log(`🔍 Premium check for user ${targetDevice.user_id} (${user.email}):`, {
-          plan: user.plan,
-          expiry_date: user.expiry_date,
-          expiry_date_parsed: user.expiry_date ? new Date(user.expiry_date).toISOString() : null,
-          expiry_date_valid: user.expiry_date ? (new Date(user.expiry_date) > new Date()) : 'N/A (lifetime)',
-          trial_started_at: user.trial_started_at,
-          trial_ended_at: user.trial_ended_at,
-          trial_started_parsed: user.trial_started_at ? new Date(user.trial_started_at).toISOString() : null,
-          trial_ended_parsed: user.trial_ended_at ? new Date(user.trial_ended_at).toISOString() : null,
-          now: new Date().toISOString(),
-          isPremium,
-          isTrial,
-          hasPremiumAccess,
-        });
-        
-        if (!hasPremiumAccess) {
-          console.log(`🚫 Free user ${targetDevice.user_id} (${user.email}) - Skipping automatic price tracking notification (local alarms still work)`);
-          return res.json({ 
-            success: true, 
-            message: 'Free user - automatic notifications disabled',
-            sent: 0,
-            skipped: true,
-            reason: 'free_user',
+          const hasPremiumAccess = isPremium || isTrial;
+          
+          // 🔍 DEBUG: Log premium status check
+          console.log(`🔍 Premium check for user ${targetDevice.user_id} (${user.email}):`, {
+            plan: user.plan,
+            expiry_date: user.expiry_date,
+            expiry_date_parsed: user.expiry_date ? new Date(user.expiry_date).toISOString() : null,
+            expiry_date_valid: user.expiry_date ? (new Date(user.expiry_date) > new Date()) : 'N/A (lifetime)',
+            trial_started_at: user.trial_started_at,
+            trial_ended_at: user.trial_ended_at,
+            trial_started_parsed: user.trial_started_at ? new Date(user.trial_started_at).toISOString() : null,
+            trial_ended_parsed: user.trial_ended_at ? new Date(user.trial_ended_at).toISOString() : null,
+            now: new Date().toISOString(),
+            isPremium,
+            isTrial,
+            hasPremiumAccess,
           });
+          
+          if (!hasPremiumAccess) {
+            console.log(`🚫 Free user ${targetDevice.user_id} (${user.email}) - Skipping automatic price tracking notification (local alarms still work)`);
+            return res.json({ 
+              success: true, 
+              message: 'Free user - automatic notifications disabled',
+              sent: 0,
+              skipped: true,
+              reason: 'free_user',
+            });
+          }
+          
+          console.log(`✅ Premium/Trial user ${targetDevice.user_id} (${user.email}) - Sending notification`);
+        } else {
+          // Local alarm - premium kontrolü yok, tüm kullanıcılar alabilir
+          console.log(`📱 Local alarm notification - Premium check skipped (free users can receive)`);
         }
-        
-        console.log(`✅ Premium/Trial user ${targetDevice.user_id} (${user.email}) - Sending notification`);
         
         devices = [targetDevice];
         targetDeviceInfo = `Device ${targetDevice.device_id} (by deviceId)`;
         console.log(`✅ Found device by deviceId: ${deviceId} - Sending notification`);
-        console.log(`   Device details: platform=${targetDevice.platform}, user_id=${targetDevice.user_id}, email=${user.email}, plan=${user.plan}, token=${targetDevice.expo_push_token.substring(0, 30)}...`);
+        const userInfo = targetDevice.user_id ? `user_id=${targetDevice.user_id}` : 'user_id=NULL';
+        console.log(`   Device details: platform=${targetDevice.platform}, ${userInfo}, token=${targetDevice.expo_push_token.substring(0, 30)}...`);
       } else {
         console.log(`❌ Device ${deviceId} not found or has no push token`);
         
@@ -153,59 +163,68 @@ router.post('/notify', optionalAuth, async (req, res) => {
           if (userDevices.length > 0) {
             console.log(`✅ Found ${userDevices.length} device(s) for user ${userId} - Using fallback method`);
             
-            // Check premium status for user
-            const user = await getUserById(userId);
-            if (user) {
-              // Premium check (same logic as above)
-              let isPremium = false;
-              if (user.plan === 'premium') {
-                if (user.expiry_date) {
-                  const expiry = new Date(user.expiry_date);
+            // Check if this is a local alarm (premium check skip)
+            const isLocalAlarm = req.body.isLocalAlarm === true;
+            
+            if (!isLocalAlarm) {
+              // Otomatik price tracking - premium kontrolü yap
+              const user = await getUserById(userId);
+              if (user) {
+                // Premium check (same logic as above)
+                let isPremium = false;
+                if (user.plan === 'premium') {
+                  if (user.expiry_date) {
+                    const expiry = new Date(user.expiry_date);
+                    const now = new Date();
+                    isPremium = expiry > now;
+                  } else {
+                    isPremium = true;
+                  }
+                }
+                
+                let isTrial = false;
+                if (user.plan === 'free' && user.trial_started_at) {
+                  const trialStart = new Date(user.trial_started_at);
+                  let trialEnd;
+                  if (user.trial_ended_at) {
+                    trialEnd = new Date(user.trial_ended_at);
+                  } else {
+                    trialEnd = new Date(trialStart);
+                    trialEnd.setDate(trialEnd.getDate() + 3);
+                  }
                   const now = new Date();
-                  isPremium = expiry > now;
-                } else {
-                  isPremium = true;
+                  isTrial = now >= trialStart && now < trialEnd;
                 }
-              }
-              
-              let isTrial = false;
-              if (user.plan === 'free' && user.trial_started_at) {
-                const trialStart = new Date(user.trial_started_at);
-                let trialEnd;
-                if (user.trial_ended_at) {
-                  trialEnd = new Date(user.trial_ended_at);
-                } else {
-                  trialEnd = new Date(trialStart);
-                  trialEnd.setDate(trialEnd.getDate() + 3);
+                
+                const hasPremiumAccess = isPremium || isTrial;
+                
+                if (!hasPremiumAccess) {
+                  console.log(`🚫 Free user ${userId} (${user.email}) - Skipping automatic price tracking notification`);
+                  return res.json({ 
+                    success: true, 
+                    message: 'Free user - automatic notifications disabled',
+                    sent: 0,
+                    skipped: true,
+                    reason: 'free_user',
+                  });
                 }
-                const now = new Date();
-                isTrial = now >= trialStart && now < trialEnd;
-              }
-              
-              const hasPremiumAccess = isPremium || isTrial;
-              
-              if (!hasPremiumAccess) {
-                console.log(`🚫 Free user ${userId} (${user.email}) - Skipping automatic price tracking notification`);
+                
+                console.log(`✅ Premium/Trial user ${userId} (${user.email}) - Sending notification to ${userDevices.length} device(s)`);
+              } else {
+                console.log(`⚠️ User ${userId} not found in fallback`);
                 return res.json({ 
                   success: true, 
-                  message: 'Free user - automatic notifications disabled',
+                  message: 'Device not found and user not found',
                   sent: 0,
-                  skipped: true,
-                  reason: 'free_user',
                 });
               }
-              
-              console.log(`✅ Premium/Trial user ${userId} (${user.email}) - Sending notification to ${userDevices.length} device(s)`);
-              devices = userDevices;
-              targetDeviceInfo = `All user devices (${userDevices.length} device(s)) via userId fallback`;
             } else {
-              console.log(`⚠️ User ${userId} not found in fallback`);
-              return res.json({ 
-                success: true, 
-                message: 'Device not found and user not found',
-                sent: 0,
-              });
+              // Local alarm - premium kontrolü yok
+              console.log(`📱 Local alarm notification (fallback) - Premium check skipped (free users can receive)`);
             }
+            
+            devices = userDevices;
+            targetDeviceInfo = `All user devices (${userDevices.length} device(s)) via userId fallback`;
           } else {
             console.log(`❌ No devices found for user ${userId} in fallback`);
             return res.json({ 

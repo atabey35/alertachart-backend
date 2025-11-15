@@ -302,7 +302,7 @@ router.get('/me', async (req, res) => {
     let token = req.cookies?.accessToken;
     
     if (!token) {
-      const authHeader = req.headers['authorization'];
+    const authHeader = req.headers['authorization'];
       token = authHeader && authHeader.split(' ')[1];
     }
 
