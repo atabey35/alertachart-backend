@@ -144,11 +144,83 @@ router.post('/notify', optionalAuth, async (req, res) => {
         console.log(`   Device details: platform=${targetDevice.platform}, user_id=${targetDevice.user_id}, email=${user.email}, plan=${user.plan}, token=${targetDevice.expo_push_token.substring(0, 30)}...`);
       } else {
         console.log(`❌ Device ${deviceId} not found or has no push token`);
-        return res.json({ 
-          success: true, 
-          message: 'Device not found or has no push token',
-          sent: 0,
-        });
+        
+        // 🔥 FALLBACK: If deviceId not found, try to find devices by userId (from cookies)
+        if (userId) {
+          console.log(`🔍 Fallback: Looking up devices by userId: ${userId}`);
+          const userDevices = await getUserDevices(userId);
+          
+          if (userDevices.length > 0) {
+            console.log(`✅ Found ${userDevices.length} device(s) for user ${userId} - Using fallback method`);
+            
+            // Check premium status for user
+            const user = await getUserById(userId);
+            if (user) {
+              // Premium check (same logic as above)
+              let isPremium = false;
+              if (user.plan === 'premium') {
+                if (user.expiry_date) {
+                  const expiry = new Date(user.expiry_date);
+                  const now = new Date();
+                  isPremium = expiry > now;
+                } else {
+                  isPremium = true;
+                }
+              }
+              
+              let isTrial = false;
+              if (user.plan === 'free' && user.trial_started_at) {
+                const trialStart = new Date(user.trial_started_at);
+                let trialEnd;
+                if (user.trial_ended_at) {
+                  trialEnd = new Date(user.trial_ended_at);
+                } else {
+                  trialEnd = new Date(trialStart);
+                  trialEnd.setDate(trialEnd.getDate() + 3);
+                }
+                const now = new Date();
+                isTrial = now >= trialStart && now < trialEnd;
+              }
+              
+              const hasPremiumAccess = isPremium || isTrial;
+              
+              if (!hasPremiumAccess) {
+                console.log(`🚫 Free user ${userId} (${user.email}) - Skipping automatic price tracking notification`);
+                return res.json({ 
+                  success: true, 
+                  message: 'Free user - automatic notifications disabled',
+                  sent: 0,
+                  skipped: true,
+                  reason: 'free_user',
+                });
+              }
+              
+              console.log(`✅ Premium/Trial user ${userId} (${user.email}) - Sending notification to ${userDevices.length} device(s)`);
+              devices = userDevices;
+              targetDeviceInfo = `All user devices (${userDevices.length} device(s)) via userId fallback`;
+            } else {
+              console.log(`⚠️ User ${userId} not found in fallback`);
+              return res.json({ 
+                success: true, 
+                message: 'Device not found and user not found',
+                sent: 0,
+              });
+            }
+          } else {
+            console.log(`❌ No devices found for user ${userId} in fallback`);
+            return res.json({ 
+              success: true, 
+              message: 'Device not found and no devices for user',
+              sent: 0,
+            });
+          }
+        } else {
+          return res.json({ 
+            success: true, 
+            message: 'Device not found or has no push token',
+            sent: 0,
+          });
+        }
       }
     } else if (pushToken) {
       // Fallback: pushToken ile cihaz bul (eski yöntem)
