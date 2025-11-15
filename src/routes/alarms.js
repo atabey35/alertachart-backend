@@ -6,16 +6,17 @@ import express from 'express';
 import { getAllActiveDevices, getDevice } from '../lib/push/db.js';
 import { getUserDevices } from '../lib/auth/db.js';
 import { sendAlarmNotification } from '../lib/push/unified-push.js';
-import { authenticateToken } from '../lib/auth/middleware.js';
+import { optionalAuth } from '../lib/auth/middleware.js';
 
 const router = express.Router();
 
 /**
  * POST /api/alarms/notify
- * Send alarm notification to user's devices only
- * Requires authentication - sends only to the authenticated user's devices
+ * Send alarm notification to device by deviceId
+ * Auth is optional - if deviceId is provided, it's used directly (deviceId is unique)
+ * If no deviceId, falls back to user_id-based lookup (requires auth)
  */
-router.post('/notify', authenticateToken, async (req, res) => {
+router.post('/notify', optionalAuth, async (req, res) => {
   try {
     const { alarmKey, symbol, message, data, pushToken, deviceId } = req.body;
     console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
@@ -33,66 +34,72 @@ router.post('/notify', authenticateToken, async (req, res) => {
       });
     }
 
-    const userId = req.user.userId; // From authenticateToken middleware
-    console.log(`🔔 Alarm triggered: ${symbol} - ${message}${alarmKey ? ` (key: ${alarmKey})` : ''} for user ${userId}`);
+    const userId = req.user?.userId; // Optional - for logging only
+    console.log(`🔔 Alarm triggered: ${symbol} - ${message}${alarmKey ? ` (key: ${alarmKey})` : ''}${userId ? ` for user ${userId}` : ''}`);
 
     let devices = [];
     let targetDeviceInfo = null;
 
-    // Get user's devices
-    const userDevices = await getUserDevices(userId);
-    
-    if (userDevices.length === 0) {
-      console.log(`⚠️ User ${userId} has no registered devices - skipping push notification`);
-      return res.json({ 
-        success: true, 
-        message: 'No devices registered for user',
-        sent: 0,
-      });
-    }
-
-    // Priority 1: deviceId (most specific - alarm was created on this device)
-    // Eğer deviceId varsa, SADECE o cihaza gönder (ama kullanıcının cihazı olmalı)
+    // 🔥 YENİ YAKLAŞIM: deviceId'ye göre direkt cihazı bul (user_id kontrolü yok)
+    // deviceId benzersiz ve alarm kurulurken kaydediliyor, o yüzden güvenli
     if (deviceId) {
-      console.log(`🔍 Looking up device with deviceId: ${deviceId} for user ${userId}`);
-      const targetDevice = userDevices.find(d => d.device_id === deviceId);
+      console.log(`🔍 Looking up device by deviceId: ${deviceId}`);
+      const targetDevice = await getDevice(deviceId);
       
-      if (targetDevice) {
+      if (targetDevice && targetDevice.expo_push_token) {
         devices = [targetDevice];
         targetDeviceInfo = `Device ${targetDevice.device_id} (by deviceId)`;
-        console.log(`✅ Found device by deviceId: ${deviceId} - Sending ONLY to this device`);
-        console.log(`   Device details: platform=${targetDevice.platform}, token=${targetDevice.expo_push_token.substring(0, 30)}...`);
+        console.log(`✅ Found device by deviceId: ${deviceId} - Sending notification`);
+        console.log(`   Device details: platform=${targetDevice.platform}, user_id=${targetDevice.user_id || 'none'}, token=${targetDevice.expo_push_token.substring(0, 30)}...`);
       } else {
-        console.log(`❌ Device ${deviceId} not found or doesn't belong to user ${userId} - NOT sending to any device`);
-        console.log(`   🔒 SECURITY: deviceId provided but not found in user's devices`);
+        console.log(`❌ Device ${deviceId} not found or has no push token`);
         return res.json({ 
           success: true, 
-          message: 'Device not found or not owned by user',
+          message: 'Device not found or has no push token',
           sent: 0,
         });
       }
     } else if (pushToken) {
-      // Priority 2: pushToken (sadece deviceId yoksa)
-      // Find device by push token (must belong to user)
-      const targetDevice = userDevices.find(d => d.expo_push_token === pushToken);
+      // Fallback: pushToken ile cihaz bul (eski yöntem)
+      console.log(`🔍 Looking up device by pushToken`);
+      const allDevices = await getAllActiveDevices();
+      const targetDevice = allDevices.find(d => d.expo_push_token === pushToken);
       
       if (targetDevice) {
         devices = [targetDevice];
         targetDeviceInfo = `Device ${targetDevice.device_id} (by pushToken)`;
-        console.log(`✅ Found device by pushToken - Sending ONLY to this device`);
-    } else {
-        console.log(`❌ Push token not found or doesn't belong to user ${userId} - NOT sending to any device`);
-      return res.json({ 
-        success: true, 
-          message: 'Device not found or not owned by user',
-        sent: 0,
-      });
+        console.log(`✅ Found device by pushToken - Sending notification`);
+      } else {
+        console.log(`❌ Push token not found`);
+        return res.json({ 
+          success: true, 
+          message: 'Device not found',
+          sent: 0,
+        });
       }
-    } else {
-      // Priority 3: Send to all user's devices
+    } else if (userId) {
+      // Fallback: user_id ile tüm cihazları bul (eski yöntem)
+      const userDevices = await getUserDevices(userId);
+      
+      if (userDevices.length === 0) {
+        console.log(`⚠️ User ${userId} has no registered devices - skipping push notification`);
+        return res.json({ 
+          success: true, 
+          message: 'No devices registered for user',
+          sent: 0,
+        });
+      }
+      
       devices = userDevices;
       targetDeviceInfo = `All user devices (${devices.length} device(s))`;
       console.log(`📱 Sending to all ${devices.length} device(s) for user ${userId}`);
+    } else {
+      console.log(`❌ No deviceId, pushToken, or userId provided`);
+      return res.json({ 
+        success: true, 
+        message: 'No device identifier provided',
+        sent: 0,
+      });
     }
 
     // Collect valid push tokens (exclude test tokens)
