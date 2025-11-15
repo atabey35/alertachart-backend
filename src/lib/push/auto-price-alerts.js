@@ -1,15 +1,16 @@
 /**
- * Otomatik Fiyat Yaklaşma Bildirimleri
- * Önemli fiyat seviyelerine yaklaşınca TÜM kullanıcılara bildirim gönderir
+ * Otomatik Fiyat Yaklaşma Bildirimleri (PREMIUM ÖZELLİK)
+ * Önemli fiyat seviyelerine yaklaşınca SADECE PREMIUM/TRIAL kullanıcılara bildirim gönderir
  */
 
 import WebSocket from 'ws';
 import { getAllActiveDevices } from './db.js';
 import { sendPriceAlertNotification } from './unified-push.js';
+import { getUserById } from '../auth/db.js';
 
 /**
- * Otomatik fiyat uyarı servisi
- * BTC 106k, ETH 4k gibi önemli seviyelere yaklaşınca herkese bildirim
+ * Otomatik fiyat uyarı servisi (PREMIUM ÖZELLİK)
+ * BTC 106k, ETH 4k gibi önemli seviyelere yaklaşınca SADECE premium/trial kullanıcılara bildirim
  */
 export class AutoPriceAlertService {
   constructor() {
@@ -342,7 +343,8 @@ export class AutoPriceAlertService {
   }
 
   /**
-   * TÜM aktif cihazlara bildirim gönder
+   * SADECE PREMIUM/TRIAL kullanıcıların cihazlarına bildirim gönder
+   * Bu otomatik price tracking bildirimi - premium özellik!
    */
   async sendNotificationToAll(symbol, name, emoji, currentPrice, targetPrice, direction) {
     try {
@@ -354,31 +356,91 @@ export class AutoPriceAlertService {
         return;
       }
 
-      // Push token'ları topla (sadece geçerli ve benzersiz olanlar)
+      // Push token'ları topla (sadece premium/trial kullanıcıların cihazları)
       // Support both Expo tokens and FCM tokens
       const uniqueTokens = new Set();
-      devices.forEach(d => {
-        const token = d.expo_push_token;
-        if (!token) return;
+      let premiumDevicesCount = 0;
+      let freeDevicesSkipped = 0;
+      let unlinkedDevicesSkipped = 0;
+
+      // Her cihaz için premium kontrolü yap
+      for (const device of devices) {
+        const token = device.expo_push_token;
+        if (!token) continue;
         
         // Exclude test tokens
         const lowerToken = token.toLowerCase();
-        if (lowerToken.includes('test') || lowerToken === 'unknown') return;
+        if (lowerToken.includes('test') || lowerToken === 'unknown') continue;
         
         // Accept both Expo and FCM tokens (length validation)
-        if (token.length > 10) {
-          uniqueTokens.add(token);
+        if (token.length <= 10) continue;
+
+        // 🔒 PREMIUM CHECK: Sadece premium/trial kullanıcıların cihazlarına gönder
+        if (!device.user_id) {
+          // Cihaz kullanıcıya bağlı değil - premium kontrolü yapılamaz, atla
+          unlinkedDevicesSkipped++;
+          continue;
         }
-      });
+
+        // Kullanıcıyı al ve premium kontrolü yap
+        const user = await getUserById(device.user_id);
+        if (!user) {
+          // Kullanıcı bulunamadı - atla
+          continue;
+        }
+
+        // Premium kontrolü (alarms.js ile aynı mantık)
+        let isPremium = false;
+        if (user.plan === 'premium') {
+          if (user.expiry_date) {
+            const expiry = new Date(user.expiry_date);
+            const now = new Date();
+            isPremium = expiry > now;
+          } else {
+            // No expiry_date means lifetime premium
+            isPremium = true;
+          }
+        }
+
+        // Trial kontrolü
+        let isTrial = false;
+        if (user.plan === 'free' && user.trial_started_at) {
+          const trialStart = new Date(user.trial_started_at);
+          let trialEnd;
+          if (user.trial_ended_at) {
+            trialEnd = new Date(user.trial_ended_at);
+          } else {
+            // Calculate trial end (3 days from start)
+            trialEnd = new Date(trialStart);
+            trialEnd.setDate(trialEnd.getDate() + 3);
+          }
+          const now = new Date();
+          isTrial = now >= trialStart && now < trialEnd;
+        }
+
+        const hasPremiumAccess = isPremium || isTrial;
+
+        if (hasPremiumAccess) {
+          uniqueTokens.add(token);
+          premiumDevicesCount++;
+        } else {
+          freeDevicesSkipped++;
+        }
+      }
 
       const tokens = Array.from(uniqueTokens);
 
+      console.log(`🔒 Premium check results:`);
+      console.log(`   ✅ Premium/Trial devices: ${premiumDevicesCount}`);
+      console.log(`   🚫 Free devices skipped: ${freeDevicesSkipped}`);
+      console.log(`   ⚠️  Unlinked devices skipped: ${unlinkedDevicesSkipped}`);
+
       if (tokens.length === 0) {
-        console.log('📱 No valid push tokens found');
+        console.log('📱 No premium/trial devices found - notification not sent');
         return;
       }
 
-      console.log(`📤 Sending notification to ${tokens.length} unique device(s)...`);
+      console.log(`📤 Sending notification to ${tokens.length} premium/trial device(s)...`);
 
       // Bildirim mesajı
       const directionEmoji = direction === 'up' ? '📈' : '📉';
@@ -396,7 +458,7 @@ export class AutoPriceAlertService {
       );
 
       if (success) {
-        console.log(`✅ Notification sent: ${title} - ${body}`);
+        console.log(`✅ Notification sent to ${tokens.length} premium/trial device(s): ${title} - ${body}`);
       } else {
         console.log(`❌ Failed to send notification`);
       }
