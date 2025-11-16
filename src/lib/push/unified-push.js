@@ -1,86 +1,59 @@
 /**
  * Unified Push Notification Service
- * Automatically detects and uses the correct push service (Expo or FCM)
+ * FCM-only implementation (Expo support removed)
  */
 
-import { Expo } from 'expo-server-sdk';
 import { sendFCMNotification, sendFCMNotifications } from './fcm-push.js';
-import { 
-  sendPushNotification as sendExpoNotification,
-  sendPushNotifications as sendExpoNotifications 
-} from './expo-push.js';
 
 /**
- * Detect if token is Expo Push Token or FCM token
- */
-function isExpoPushToken(token) {
-  return token && (token.startsWith('ExponentPushToken[') || token.startsWith('ExpoPushToken['));
-}
-
-/**
- * Send push notification to single device (auto-detect token type)
+ * Send push notification to single device (FCM only)
  */
 export async function sendPushNotification(token, title, body, data) {
-  if (isExpoPushToken(token)) {
-    console.log('[UnifiedPush] Using Expo for token:', token.substring(0, 20) + '...');
-    return sendExpoNotification(token, title, body, data);
-  } else {
-    console.log('[UnifiedPush] Using FCM for token:', token.substring(0, 20) + '...');
-    return sendFCMNotification(token, title, body, data);
-  }
+  console.log('[UnifiedPush] Using FCM for token:', token.substring(0, 20) + '...');
+  return sendFCMNotification(token, title, body, data);
 }
 
 /**
- * Send push notifications to multiple devices (auto-detect token types)
+ * Send push notifications to multiple devices (FCM only)
  */
 export async function sendPushNotifications(payloads) {
-  // Separate Expo and FCM payloads
-  const expoPayloads = [];
+  // Convert all payloads to FCM format
   const fcmPayloads = [];
 
   for (const payload of payloads) {
     const tokens = Array.isArray(payload.to) ? payload.to : [payload.to];
-    const expoTokens = [];
-    const fcmTokens = [];
-
-    for (const token of tokens) {
-      if (isExpoPushToken(token)) {
-        expoTokens.push(token);
-      } else {
-        fcmTokens.push(token);
+    
+    // Filter out invalid tokens (placeholders, test tokens, etc.)
+    const validTokens = tokens.filter(token => {
+      if (!token || typeof token !== 'string') return false;
+      const lowerToken = token.toLowerCase();
+      // Reject placeholders, test tokens, and invalid tokens
+      if (lowerToken.includes('placeholder') || 
+          lowerToken.includes('test') || 
+          lowerToken === 'unknown' ||
+          token.length < 50) { // FCM tokens are typically longer
+        return false;
       }
-    }
+      return true;
+    });
 
-    if (expoTokens.length > 0) {
-      expoPayloads.push({
-        ...payload,
-        to: expoTokens,
-      });
-    }
-
-    if (fcmTokens.length > 0) {
+    if (validTokens.length > 0) {
       fcmPayloads.push({
         ...payload,
-        token: fcmTokens,
+        token: validTokens,
       });
     }
   }
 
-  // Send to both services
-  const results = [];
-
-  if (expoPayloads.length > 0) {
-    console.log(`[UnifiedPush] Sending ${expoPayloads.length} payloads via Expo`);
-    results.push(await sendExpoNotifications(expoPayloads));
+  if (fcmPayloads.length === 0) {
+    console.warn('[UnifiedPush] No valid FCM tokens to send');
+    return false;
   }
 
-  if (fcmPayloads.length > 0) {
-    console.log(`[UnifiedPush] Sending ${fcmPayloads.length} payloads via FCM`);
-    results.push(await sendFCMNotifications(fcmPayloads));
-  }
-
-  // Return true if any service succeeded
-  return results.some(result => result === true);
+  const fcmTokenCount = fcmPayloads.reduce((sum, p) => sum + (Array.isArray(p.token) ? p.token.length : 1), 0);
+  console.log(`[UnifiedPush] Sending ${fcmPayloads.length} payloads via FCM (${fcmTokenCount} tokens)`);
+  
+  return await sendFCMNotifications(fcmPayloads);
 }
 
 /**

@@ -95,19 +95,46 @@ export async function sendPushNotifications(payloads) {
 
     console.log('Expo tickets aggregated:', JSON.stringify(tickets, null, 2));
 
-    // Check for errors
+    // Check for errors and log detailed information
     let hasErrors = false;
-    for (const ticket of tickets) {
+    let errorCount = 0;
+    let successCount = 0;
+    
+    for (let i = 0; i < tickets.length; i++) {
+      const ticket = tickets[i];
+      const message = messages[i];
+      
       if (ticket.status === 'error') {
         hasErrors = true;
-        console.error('Push notification error:', {
+        errorCount++;
+        console.error(`❌ Expo push notification error (message ${i + 1}):`, {
+          token: message.to ? message.to.substring(0, 40) + '...' : 'unknown',
           message: ticket.message,
           details: ticket.details,
+          errorCode: ticket.details?.errorCode,
         });
+        
+        // Log specific error types
+        if (ticket.details?.errorCode === 'DeviceNotRegistered') {
+          console.error(`   ⚠️  Device not registered - token may be invalid or expired`);
+        } else if (ticket.details?.errorCode === 'MessageTooBig') {
+          console.error(`   ⚠️  Message too big - payload size exceeded`);
+        } else if (ticket.details?.errorCode === 'MessageRateExceeded') {
+          console.error(`   ⚠️  Message rate exceeded - too many notifications sent`);
+        }
+      } else if (ticket.status === 'ok') {
+        successCount++;
       }
     }
 
     console.log(`✅ Sent ${messages.length} push notifications, ${tickets.length} tickets received`);
+    console.log(`   Success: ${successCount}, Errors: ${errorCount}`);
+    
+    // If there are errors, log a summary
+    if (hasErrors) {
+      console.warn(`⚠️  ${errorCount} Expo push notification(s) failed. Check error details above.`);
+    }
+    
     return !hasErrors;
   } catch (error) {
     console.error('Failed to send push notifications:', error);

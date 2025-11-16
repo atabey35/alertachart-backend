@@ -38,22 +38,33 @@ router.post('/broadcast', async (req, res) => {
       });
     }
 
-    // Collect valid push tokens (exclude test tokens)
+    // Collect valid push tokens with device info (exclude test tokens and placeholders)
     // Support both Expo tokens and FCM tokens
-    const tokens = devices
-      .map(d => d.expo_push_token)
-      .filter(token => {
+    const deviceTokens = devices
+      .map(d => ({
+        token: d.expo_push_token,
+        platform: d.platform,
+        deviceId: d.device_id,
+      }))
+      .filter(({ token }) => {
         if (!token) return false;
-        // Exclude any test tokens (case-insensitive)
+        // Exclude any test tokens, placeholders, or invalid tokens (case-insensitive)
         const lowerToken = token.toLowerCase();
-        if (lowerToken.includes('test') || lowerToken === 'unknown') return false;
-        // Accept both Expo tokens and FCM tokens
-        // Expo: ExponentPushToken[...] or ExpoPushToken[...]
-        // FCM: long string without brackets
-        return token.length > 10; // Simple validation
+        if (lowerToken.includes('test') || 
+            lowerToken.includes('placeholder') || 
+            lowerToken === 'unknown' ||
+            lowerToken.includes('invalid')) {
+          return false;
+        }
+        // FCM tokens only - validate length and format
+        // FCM tokens are typically 50+ characters long
+        if (token.length < 50) return false;
+        // FCM tokens should not contain brackets (Expo format)
+        if (token.includes('[') || token.includes(']')) return false;
+        return true;
       });
 
-    if (tokens.length === 0) {
+    if (deviceTokens.length === 0) {
       console.log('📱 No valid push tokens found');
       return res.json({ 
         success: true, 
@@ -63,10 +74,27 @@ router.post('/broadcast', async (req, res) => {
       });
     }
 
-    console.log(`📤 Broadcasting to ${tokens.length} device(s)...`);
-    console.log(`   First token example: ${tokens[0].substring(0, 50)}...`);
+    // Log platform breakdown
+    const iosDevices = deviceTokens.filter(d => d.platform === 'ios');
+    const androidDevices = deviceTokens.filter(d => d.platform === 'android');
+    console.log(`📤 Broadcasting to ${deviceTokens.length} device(s)...`);
+    console.log(`   iOS devices: ${iosDevices.length}`);
+    console.log(`   Android devices: ${androidDevices.length}`);
+    console.log(`   First token example: ${deviceTokens[0].token.substring(0, 50)}...`);
+    
+    // Log iOS device tokens for debugging
+    if (iosDevices.length > 0) {
+      console.log(`   iOS token examples:`);
+      iosDevices.slice(0, 3).forEach((d, idx) => {
+        const tokenPreview = d.token.substring(0, 40);
+        const isValid = d.token.length >= 50 && !d.token.toLowerCase().includes('placeholder') && !d.token.includes('[');
+        console.log(`     ${idx + 1}. FCM token: ${tokenPreview}... (device: ${d.deviceId}) ${isValid ? '✅' : '❌ INVALID'}`);
+      });
+    }
 
-    // Prepare payloads for each token (unified-push will detect Expo vs FCM)
+    const tokens = deviceTokens.map(d => d.token);
+
+    // Prepare payloads for each token (FCM only)
     const payloads = tokens.map(token => ({
       to: token,
       title: title,
@@ -80,7 +108,7 @@ router.post('/broadcast', async (req, res) => {
       priority: 'high',
     }));
 
-    // Send push notifications (unified-push handles Expo + FCM)
+    // Send push notifications via FCM
     const success = await sendPushNotifications(payloads);
 
     if (success) {

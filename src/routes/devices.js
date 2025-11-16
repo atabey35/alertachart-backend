@@ -26,6 +26,15 @@ router.post('/register-native', async (req, res) => {
       });
     }
 
+    // Validate pushToken is not a placeholder
+    if (pushToken.toLowerCase().includes('placeholder')) {
+      console.error(`[Device Register Native] ❌ Invalid pushToken provided (contains 'placeholder'): ${pushToken.substring(0, 40)}...`);
+      return res.status(400).json({
+        error: 'Invalid pushToken: placeholder tokens are not allowed. Please provide a valid push token.',
+        invalidToken: true
+      });
+    }
+
     console.log(`[Device Register Native] Registering device: ${deviceId} (${platform})`);
     console.log(`[Device Register Native] Token: ${pushToken.substring(0, 30)}...`);
 
@@ -95,13 +104,29 @@ router.post('/link', authenticateToken, async (req, res) => {
       // Determine platform from request or default to 'ios'
       const devicePlatform = platform || req.body.platform || 'ios';
       
-      // Use pushToken if provided, otherwise use placeholder (device will be updated later when push token is available)
-      const devicePushToken = pushToken || `placeholder-${deviceId}-${Date.now()}`;
+      // ⚠️ IMPORTANT: Don't create placeholder tokens - only create device if pushToken is provided
+      // If pushToken is not provided, we can't create a valid device for push notifications
+      if (!pushToken) {
+        console.warn(`[Device Link] ⚠️  No pushToken provided for device ${deviceId}. Device will not be created. Push token is required for notifications.`);
+        return res.status(400).json({
+          error: 'pushToken is required to create a new device. Please provide a valid push token.',
+          requiresPushToken: true
+        });
+      }
       
-      // Create device with minimal info (will be updated later if pushToken is provided)
+      // Validate pushToken is not a placeholder
+      if (pushToken.toLowerCase().includes('placeholder')) {
+        console.error(`[Device Link] ❌ Invalid pushToken provided (contains 'placeholder'): ${pushToken.substring(0, 40)}...`);
+        return res.status(400).json({
+          error: 'Invalid pushToken: placeholder tokens are not allowed. Please provide a valid push token.',
+          invalidToken: true
+        });
+      }
+      
+      // Create device with provided pushToken
       device = await upsertDevice(
         deviceId,
-        devicePushToken,
+        pushToken,
         devicePlatform,
         '1.0.0', // Default app version
         userId, // Link to user immediately
@@ -118,8 +143,17 @@ router.post('/link', authenticateToken, async (req, res) => {
       }
       const sql = neon(process.env.DATABASE_URL);
       
-      // Update pushToken if provided
+      // Update pushToken if provided (and validate it's not a placeholder)
       if (pushToken && pushToken !== device.expo_push_token) {
+        // Validate pushToken is not a placeholder
+        if (pushToken.toLowerCase().includes('placeholder')) {
+          console.error(`[Device Link] ❌ Invalid pushToken provided (contains 'placeholder'): ${pushToken.substring(0, 40)}...`);
+          return res.status(400).json({
+            error: 'Invalid pushToken: placeholder tokens are not allowed. Please provide a valid push token.',
+            invalidToken: true
+          });
+        }
+        
         console.log(`[Device Link] Updating push token for device ${deviceId}`);
         const updateResult = await sql`
           UPDATE devices
@@ -158,7 +192,7 @@ router.post('/link', authenticateToken, async (req, res) => {
         platform: device.platform,
         userId: device.user_id,
         linkedAt: device.updated_at,
-        created: !device.expo_push_token?.startsWith('placeholder'), // Indicates if device was just created
+        hasValidToken: !device.expo_push_token?.toLowerCase().includes('placeholder'), // Indicates if device has valid push token
       },
     });
   } catch (error) {

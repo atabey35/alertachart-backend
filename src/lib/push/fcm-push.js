@@ -143,19 +143,34 @@ export async function sendFCMNotifications(payloads) {
       for (let idx = 0; idx < responses.responses.length; idx++) {
         const resp = responses.responses[idx];
         if (!resp.success) {
-          console.error(`FCM Error for message ${idx}:`, resp.error);
+          const errorCode = resp.error?.code;
+          const errorMessage = resp.error?.message;
+          const invalidToken = messages[idx].token;
+          
+          console.error(`❌ FCM Error for message ${idx}:`, {
+            token: invalidToken.substring(0, 40) + '...',
+            code: errorCode,
+            message: errorMessage,
+          });
           
           // Clean up invalid tokens from database
-          const errorCode = resp.error?.code;
           if (errorCode === 'messaging/registration-token-not-registered' || 
-              errorCode === 'messaging/invalid-registration-token') {
-            const invalidToken = messages[idx].token;
+              errorCode === 'messaging/invalid-registration-token' ||
+              errorCode === 'messaging/invalid-argument') {
             console.log(`🗑️  Removing invalid FCM token: ${invalidToken.substring(0, 30)}...`);
             try {
               await deleteDeviceByToken(invalidToken);
               console.log(`✅ Invalid token removed from database`);
             } catch (deleteError) {
               console.error(`Failed to delete invalid token:`, deleteError);
+            }
+          } else {
+            // Log other error types for debugging
+            console.error(`   ⚠️  FCM error code: ${errorCode} - ${errorMessage}`);
+            if (errorCode === 'messaging/authentication-error') {
+              console.error(`   ⚠️  Firebase authentication error - check service account credentials`);
+            } else if (errorCode === 'messaging/server-unavailable') {
+              console.error(`   ⚠️  FCM server unavailable - retry may be needed`);
             }
           }
         }
