@@ -300,7 +300,7 @@ router.get('/me', async (req, res) => {
   try {
     // Try to get token from cookies first (for web/Capacitor), then from Authorization header (for native)
     let token = req.cookies?.accessToken;
-    const tokenSource = token ? 'cookie' : null;
+    let tokenSource = token ? 'cookie' : null;
     
     if (!token) {
       const authHeader = req.headers['authorization'];
