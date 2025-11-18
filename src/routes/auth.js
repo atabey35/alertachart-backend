@@ -301,9 +301,22 @@ router.get('/me', async (req, res) => {
     // Try to get token from cookies first (for web/Capacitor), then from Authorization header (for native)
     let token = req.cookies?.accessToken;
     
-    // 🔥 CRITICAL FIX: Filter out "undefined" string (common bug when cookie is set with undefined value)
-    if (token === 'undefined' || token === 'null' || !token || token.trim() === '') {
+    // 🔥 CRITICAL FIX: Filter out "undefined", "null" strings, empty strings, and whitespace-only strings
+    // Also check if token is actually a valid JWT (should have 3 parts separated by dots)
+    if (!token || 
+        token === 'undefined' || 
+        token === 'null' || 
+        typeof token !== 'string' ||
+        token.trim() === '' ||
+        token.length < 10) { // JWT tokens are at least 10 characters
       token = null;
+    } else {
+      // Additional validation: Check if it looks like a JWT (has 3 parts)
+      const parts = token.split('.');
+      if (parts.length !== 3) {
+        console.log(`[Auth /me] ⚠️ Token doesn't look like JWT (${parts.length} parts instead of 3), ignoring`);
+        token = null;
+      }
     }
     
     let tokenSource = token ? 'cookie' : null;
