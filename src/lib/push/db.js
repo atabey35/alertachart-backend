@@ -108,15 +108,15 @@ export async function upsertDevice(deviceId, expoPushToken, platform, appVersion
   // This ensures login users can link their devices automatically
   // COALESCE logic: If userId is provided (not null), use it. Otherwise, keep existing user_id.
   // But if existing user_id is NULL and userId is provided, we want to link it!
-  // 🔥 FIX: Handle null values for model and osVersion to avoid PostgreSQL type inference errors
-  // Use COALESCE to preserve existing values when null is provided
+  // 🔥 FIX: Handle null values for model, osVersion, and appVersion to avoid PostgreSQL type inference errors
+  // Use explicit ::text casts for all string parameters
   const result = await sql`
     INSERT INTO devices (device_id, expo_push_token, platform, app_version, user_id, model, os_version, updated_at)
     VALUES (
       ${deviceId}, 
       ${expoPushToken}, 
-      ${platform}, 
-      ${appVersion}, 
+      ${platform}::text, 
+      ${appVersion || '1.0.0'}::text, 
       ${userId}, 
       ${model || null}::text, 
       ${osVersion || null}::text, 
@@ -130,8 +130,11 @@ export async function upsertDevice(deviceId, expoPushToken, platform, appVersion
         WHEN ${expoPushToken} IS NOT NULL THEN ${expoPushToken}
         ELSE devices.expo_push_token
       END,
-      platform = ${platform},
-      app_version = ${appVersion},
+      platform = ${platform}::text,
+      app_version = CASE 
+        WHEN ${appVersion} IS NOT NULL THEN ${appVersion}::text
+        ELSE devices.app_version
+      END,
       -- 🔥 FIX: If userId is provided, use it. Otherwise, keep existing user_id.
       -- This allows linking devices on login (when userId is provided)
       user_id = CASE 
