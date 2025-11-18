@@ -12,9 +12,17 @@ export function authenticateToken(req, res, next) {
   // Try to get token from cookies first (for web/Capacitor), then from Authorization header (for native)
   let token = req.cookies?.accessToken;
   
+  // 🔥 CRITICAL FIX: Filter out "undefined" string (common bug when cookie is set with undefined value)
+  if (token === 'undefined' || token === 'null' || !token || token.trim() === '') {
+    token = null;
+  }
+  
   if (!token) {
     const authHeader = req.headers['authorization'];
-    token = authHeader && authHeader.split(' ')[1]; // Bearer TOKEN
+    const headerToken = authHeader && authHeader.split(' ')[1]; // Bearer TOKEN
+    if (headerToken && headerToken !== 'undefined' && headerToken !== 'null') {
+      token = headerToken;
+    }
   }
 
   if (!token) {
@@ -38,9 +46,17 @@ export function optionalAuth(req, res, next) {
   // Try to get token from cookies first (for web/Capacitor), then from Authorization header (for native)
   let token = req.cookies?.accessToken;
   
+  // 🔥 CRITICAL FIX: Filter out "undefined" string (common bug when cookie is set with undefined value)
+  if (token === 'undefined' || token === 'null' || !token || token.trim() === '') {
+    token = null;
+  }
+  
   if (!token) {
     const authHeader = req.headers['authorization'];
-    token = authHeader && authHeader.split(' ')[1]; // Bearer TOKEN
+    const headerToken = authHeader && authHeader.split(' ')[1]; // Bearer TOKEN
+    if (headerToken && headerToken !== 'undefined' && headerToken !== 'null') {
+      token = headerToken;
+    }
   }
 
   if (token) {
@@ -55,7 +71,7 @@ export function optionalAuth(req, res, next) {
       // Ignore invalid tokens for optional auth - this is expected behavior
       // Don't log errors for optional auth to avoid spam
       if (process.env.NODE_ENV === 'development') {
-        console.log(`[optionalAuth] ⚠️ Invalid/expired token (ignored for optional auth)`);
+        console.log(`[optionalAuth] ⚠️ Invalid/expired token (ignored for optional auth): ${error.message}`);
       }
     }
   } else {

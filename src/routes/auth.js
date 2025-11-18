@@ -300,12 +300,19 @@ router.get('/me', async (req, res) => {
   try {
     // Try to get token from cookies first (for web/Capacitor), then from Authorization header (for native)
     let token = req.cookies?.accessToken;
+    
+    // 🔥 CRITICAL FIX: Filter out "undefined" string (common bug when cookie is set with undefined value)
+    if (token === 'undefined' || token === 'null' || !token || token.trim() === '') {
+      token = null;
+    }
+    
     let tokenSource = token ? 'cookie' : null;
     
     if (!token) {
       const authHeader = req.headers['authorization'];
-      token = authHeader && authHeader.split(' ')[1];
-      if (token) {
+      const headerToken = authHeader && authHeader.split(' ')[1];
+      if (headerToken && headerToken !== 'undefined' && headerToken !== 'null') {
+        token = headerToken;
         tokenSource = 'header';
       }
     }
