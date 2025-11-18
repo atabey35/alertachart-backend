@@ -137,8 +137,9 @@ export async function upsertDevice(deviceId, expoPushToken, platform, appVersion
       END,
       -- 🔥 FIX: If userId is provided, use it. Otherwise, keep existing user_id.
       -- This allows linking devices on login (when userId is provided)
+      -- Cast to integer to help PostgreSQL type inference
       user_id = CASE 
-        WHEN ${userId} IS NOT NULL THEN ${userId}
+        WHEN ${userId}::integer IS NOT NULL THEN ${userId}::integer
         ELSE devices.user_id
       END,
       -- 🔥 FIX: Only update model/os_version if provided (not null)
