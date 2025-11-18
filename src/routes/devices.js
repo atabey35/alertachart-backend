@@ -111,29 +111,28 @@ router.post('/link', authenticateToken, async (req, res) => {
       // Determine platform from request or default to 'ios'
       const devicePlatform = platform || req.body.platform || 'ios';
       
-      // ⚠️ IMPORTANT: Don't create placeholder tokens - only create device if pushToken is provided
-      // If pushToken is not provided, we can't create a valid device for push notifications
-      if (!pushToken) {
-        console.warn(`[Device Link] ⚠️  No pushToken provided for device ${deviceId}. Device will not be created. Push token is required for notifications.`);
-        return res.status(400).json({
-          error: 'pushToken is required to create a new device. Please provide a valid push token.',
-          requiresPushToken: true
-        });
+      // 🔥 FIX: Allow device creation without pushToken
+      // Push token can be added later when push notifications are initialized
+      // This allows device linking to work immediately after login, even if push token isn't ready yet
+      if (pushToken) {
+        // Validate pushToken is not a placeholder
+        if (pushToken.toLowerCase().includes('placeholder')) {
+          console.error(`[Device Link] ❌ Invalid pushToken provided (contains 'placeholder'): ${pushToken.substring(0, 40)}...`);
+          return res.status(400).json({
+            error: 'Invalid pushToken: placeholder tokens are not allowed. Please provide a valid push token.',
+            invalidToken: true
+          });
+        }
+        console.log(`[Device Link] Creating device ${deviceId} with push token`);
+      } else {
+        console.log(`[Device Link] ⚠️  No pushToken provided for device ${deviceId}. Creating device without push token (will be updated later).`);
       }
       
-      // Validate pushToken is not a placeholder
-      if (pushToken.toLowerCase().includes('placeholder')) {
-        console.error(`[Device Link] ❌ Invalid pushToken provided (contains 'placeholder'): ${pushToken.substring(0, 40)}...`);
-        return res.status(400).json({
-          error: 'Invalid pushToken: placeholder tokens are not allowed. Please provide a valid push token.',
-          invalidToken: true
-        });
-      }
-      
-      // Create device with provided pushToken
+      // Create device (with or without pushToken)
+      // upsertDevice accepts null for expoPushToken
       device = await upsertDevice(
         deviceId,
-        pushToken,
+        pushToken || null, // Allow null pushToken
         devicePlatform,
         '1.0.0', // Default app version
         userId, // Link to user immediately
@@ -141,7 +140,7 @@ router.post('/link', authenticateToken, async (req, res) => {
         null  // osVersion
       );
       
-      console.log(`✅ Device ${deviceId} created automatically and linked to user ${userId}`);
+      console.log(`✅ Device ${deviceId} created automatically and linked to user ${userId}${pushToken ? ' (with push token)' : ' (push token will be added later)'}`);
     } else {
       // Device exists, just update userId
       const { neon } = await import('@neondatabase/serverless');

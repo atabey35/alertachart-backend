@@ -113,7 +113,12 @@ export async function upsertDevice(deviceId, expoPushToken, platform, appVersion
     VALUES (${deviceId}, ${expoPushToken}, ${platform}, ${appVersion}, ${userId}, ${model}, ${osVersion}, CURRENT_TIMESTAMP)
     ON CONFLICT (device_id)
     DO UPDATE SET
-      expo_push_token = ${expoPushToken},
+      -- 🔥 FIX: Only update push token if provided (not null)
+      -- This prevents overwriting existing push token when linking device without push token
+      expo_push_token = CASE 
+        WHEN ${expoPushToken} IS NOT NULL THEN ${expoPushToken}
+        ELSE devices.expo_push_token
+      END,
       platform = ${platform},
       app_version = ${appVersion},
       -- 🔥 FIX: If userId is provided, use it. Otherwise, keep existing user_id.
