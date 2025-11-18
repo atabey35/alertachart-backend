@@ -127,12 +127,12 @@ export async function upsertDevice(deviceId, expoPushToken, platform, appVersion
       -- 🔥 FIX: Only update push token if provided (not null)
       -- This prevents overwriting existing push token when linking device without push token
       expo_push_token = CASE 
-        WHEN ${expoPushToken} IS NOT NULL THEN ${expoPushToken}
+        WHEN ${expoPushToken}::text IS NOT NULL THEN ${expoPushToken}::text
         ELSE devices.expo_push_token
       END,
       platform = ${platform}::text,
       app_version = CASE 
-        WHEN ${appVersion} IS NOT NULL THEN ${appVersion}::text
+        WHEN ${appVersion}::text IS NOT NULL THEN ${appVersion}::text
         ELSE devices.app_version
       END,
       -- 🔥 FIX: If userId is provided, use it. Otherwise, keep existing user_id.
@@ -142,12 +142,13 @@ export async function upsertDevice(deviceId, expoPushToken, platform, appVersion
         ELSE devices.user_id
       END,
       -- 🔥 FIX: Only update model/os_version if provided (not null)
+      -- Cast to text in CASE WHEN clause to help PostgreSQL type inference
       model = CASE 
-        WHEN ${model} IS NOT NULL THEN ${model}::text
+        WHEN ${model}::text IS NOT NULL THEN ${model}::text
         ELSE devices.model
       END,
       os_version = CASE 
-        WHEN ${osVersion} IS NOT NULL THEN ${osVersion}::text
+        WHEN ${osVersion}::text IS NOT NULL THEN ${osVersion}::text
         ELSE devices.os_version
       END,
       is_active = true,
