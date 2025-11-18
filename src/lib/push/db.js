@@ -103,6 +103,11 @@ export async function initPushDatabase() {
 // Device operations
 export async function upsertDevice(deviceId, expoPushToken, platform, appVersion, userId = null, model = null, osVersion = null) {
   const sql = getSql();
+  
+  // 🔥 CRITICAL FIX: If userId is provided, always update user_id (even if device already exists)
+  // This ensures login users can link their devices automatically
+  // COALESCE logic: If userId is provided (not null), use it. Otherwise, keep existing user_id.
+  // But if existing user_id is NULL and userId is provided, we want to link it!
   const result = await sql`
     INSERT INTO devices (device_id, expo_push_token, platform, app_version, user_id, model, os_version, updated_at)
     VALUES (${deviceId}, ${expoPushToken}, ${platform}, ${appVersion}, ${userId}, ${model}, ${osVersion}, CURRENT_TIMESTAMP)
@@ -111,13 +116,26 @@ export async function upsertDevice(deviceId, expoPushToken, platform, appVersion
       expo_push_token = ${expoPushToken},
       platform = ${platform},
       app_version = ${appVersion},
-      user_id = COALESCE(${userId}, devices.user_id),
+      -- 🔥 FIX: If userId is provided, use it. Otherwise, keep existing user_id.
+      -- This allows linking devices on login (when userId is provided)
+      user_id = CASE 
+        WHEN ${userId} IS NOT NULL THEN ${userId}
+        ELSE devices.user_id
+      END,
       model = ${model},
       os_version = ${osVersion},
       is_active = true,
       updated_at = CURRENT_TIMESTAMP
     RETURNING *
   `;
+  
+  // Debug log
+  if (userId) {
+    console.log(`[upsertDevice] ✅ Device ${deviceId} linked to user ${userId}`);
+  } else {
+    console.log(`[upsertDevice] ⚠️  Device ${deviceId} registered without user_id (will be linked on login)`);
+  }
+  
   return result[0];
 }
 

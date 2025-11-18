@@ -42,6 +42,15 @@ router.post('/register', optionalAuth, async (req, res) => {
 
     // Get userId from authenticated user (if available)
     const userId = req.user?.userId || null;
+    
+    // 🔥 DEBUG: Log authentication status
+    if (userId) {
+      console.log(`[Push Register] ✅ User authenticated: ${userId} (${req.user?.email || 'no email'})`);
+    } else {
+      console.log(`[Push Register] ⚠️  No user authentication - device will be registered without user_id`);
+      console.log(`[Push Register]    Cookies: ${req.cookies ? Object.keys(req.cookies).join(', ') : 'none'}`);
+      console.log(`[Push Register]    Auth header: ${req.headers['authorization'] ? 'present' : 'none'}`);
+    }
 
     // Upsert device
     const device = await upsertDevice(
@@ -54,7 +63,7 @@ router.post('/register', optionalAuth, async (req, res) => {
       osVersion || 'Unknown'
     );
 
-    console.log(`✅ Device registered: ${deviceId} (${platform})${userId ? ` for user ${userId}` : ''}`);
+    console.log(`✅ Device registered: ${deviceId} (${platform})${userId ? ` for user ${userId}` : ' (not linked - will be linked on login)'}`);
 
     res.json({
       success: true,
