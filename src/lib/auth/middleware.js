@@ -12,15 +12,32 @@ export function authenticateToken(req, res, next) {
   // Try to get token from cookies first (for web/Capacitor), then from Authorization header (for native)
   let token = req.cookies?.accessToken;
   
-  // 🔥 CRITICAL FIX: Filter out "undefined" string (common bug when cookie is set with undefined value)
-  if (token === 'undefined' || token === 'null' || !token || token.trim() === '') {
+  // 🔥 CRITICAL FIX: Filter out "undefined", "null" strings, empty strings, and invalid tokens
+  // Also check if token is actually a valid JWT (should have 3 parts separated by dots)
+  if (!token || 
+      token === 'undefined' || 
+      token === 'null' || 
+      typeof token !== 'string' ||
+      token.trim() === '' ||
+      token.length < 10) { // JWT tokens are at least 10 characters
     token = null;
+  } else {
+    // Additional validation: Check if it looks like a JWT (has 3 parts)
+    const parts = token.split('.');
+    if (parts.length !== 3) {
+      token = null;
+    }
   }
   
   if (!token) {
     const authHeader = req.headers['authorization'];
     const headerToken = authHeader && authHeader.split(' ')[1]; // Bearer TOKEN
-    if (headerToken && headerToken !== 'undefined' && headerToken !== 'null') {
+    if (headerToken && 
+        headerToken !== 'undefined' && 
+        headerToken !== 'null' &&
+        typeof headerToken === 'string' &&
+        headerToken.length >= 10 &&
+        headerToken.split('.').length === 3) {
       token = headerToken;
     }
   }
@@ -46,15 +63,32 @@ export function optionalAuth(req, res, next) {
   // Try to get token from cookies first (for web/Capacitor), then from Authorization header (for native)
   let token = req.cookies?.accessToken;
   
-  // 🔥 CRITICAL FIX: Filter out "undefined" string (common bug when cookie is set with undefined value)
-  if (token === 'undefined' || token === 'null' || !token || token.trim() === '') {
+  // 🔥 CRITICAL FIX: Filter out "undefined", "null" strings, empty strings, and invalid tokens
+  // Also check if token is actually a valid JWT (should have 3 parts separated by dots)
+  if (!token || 
+      token === 'undefined' || 
+      token === 'null' || 
+      typeof token !== 'string' ||
+      token.trim() === '' ||
+      token.length < 10) { // JWT tokens are at least 10 characters
     token = null;
+  } else {
+    // Additional validation: Check if it looks like a JWT (has 3 parts)
+    const parts = token.split('.');
+    if (parts.length !== 3) {
+      token = null;
+    }
   }
   
   if (!token) {
     const authHeader = req.headers['authorization'];
     const headerToken = authHeader && authHeader.split(' ')[1]; // Bearer TOKEN
-    if (headerToken && headerToken !== 'undefined' && headerToken !== 'null') {
+    if (headerToken && 
+        headerToken !== 'undefined' && 
+        headerToken !== 'null' &&
+        typeof headerToken === 'string' &&
+        headerToken.length >= 10 &&
+        headerToken.split('.').length === 3) {
       token = headerToken;
     }
   }
