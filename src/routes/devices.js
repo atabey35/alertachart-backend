@@ -89,7 +89,14 @@ router.post('/link', authenticateToken, async (req, res) => {
     }
 
     const userId = req.user.userId; // From authenticateToken middleware
-    console.log(`[Device Link] Linking device ${deviceId} to user ${userId}`);
+    console.log(`[Device Link] Linking device ${deviceId} to user ${userId}`, {
+      userId,
+      email: req.user.email,
+      hasCookies: !!req.cookies,
+      cookieNames: req.cookies ? Object.keys(req.cookies).join(', ') : 'none',
+      hasAccessToken: !!req.cookies?.accessToken,
+      accessTokenLength: req.cookies?.accessToken?.length || 0,
+    });
 
     // Initialize database (first time)
     await initPushDatabase();

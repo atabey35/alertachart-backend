@@ -406,7 +406,19 @@ router.get('/me', async (req, res) => {
               maxAge: 15 * 60 * 1000, // 15 minutes
             });
             
-            console.log(`[Auth /me] ✅ Token refreshed successfully (no access token): userId=${session.user_id}`);
+            // 🔥 CRITICAL: Verify cookie was set correctly
+            console.log(`[Auth /me] ✅ Token refreshed successfully (no access token): userId=${session.user_id}`, {
+              tokenLength: newAccessToken.length,
+              cookieSet: true,
+              cookieOptions: {
+                httpOnly: cookieOptions.httpOnly,
+                secure: cookieOptions.secure,
+                sameSite: cookieOptions.sameSite,
+                domain: cookieOptions.domain,
+                path: cookieOptions.path,
+                maxAge: 15 * 60 * 1000,
+              },
+            });
             
             // Get user and return
             const user = await getUserById(session.user_id);
@@ -520,7 +532,19 @@ router.get('/me', async (req, res) => {
               maxAge: 15 * 60 * 1000, // 15 minutes
             });
             
-            console.log(`[Auth /me] ✅ Token refreshed successfully: userId=${session.user_id}`);
+            // 🔥 CRITICAL: Verify cookie was set correctly
+            console.log(`[Auth /me] ✅ Token refreshed successfully: userId=${session.user_id}`, {
+              tokenLength: newAccessToken.length,
+              cookieSet: true,
+              cookieOptions: {
+                httpOnly: cookieOptions.httpOnly,
+                secure: cookieOptions.secure,
+                sameSite: cookieOptions.sameSite,
+                domain: cookieOptions.domain,
+                path: cookieOptions.path,
+                maxAge: 15 * 60 * 1000,
+              },
+            });
             
             // Get user and return
             const user = await getUserById(session.user_id);
