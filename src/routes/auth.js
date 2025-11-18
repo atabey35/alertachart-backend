@@ -71,6 +71,25 @@ router.post('/register', async (req, res) => {
     // Generate tokens
     const accessToken = generateAccessToken(user.id, user.email);
     const refreshToken = generateRefreshToken(user.id, user.email);
+    
+    // 🔥 CRITICAL: Validate tokens before setting cookies
+    if (!accessToken || !refreshToken || 
+        accessToken === 'undefined' || refreshToken === 'undefined' ||
+        accessToken === 'null' || refreshToken === 'null' ||
+        typeof accessToken !== 'string' || typeof refreshToken !== 'string' ||
+        accessToken.length < 10 || refreshToken.length < 10) {
+      console.error('[Auth Register] ❌ Invalid tokens generated:', {
+        hasAccessToken: !!accessToken,
+        hasRefreshToken: !!refreshToken,
+        accessTokenType: typeof accessToken,
+        refreshTokenType: typeof refreshToken,
+        accessTokenLength: accessToken?.length || 0,
+        refreshTokenLength: refreshToken?.length || 0,
+      });
+      return res.status(500).json({
+        error: 'Failed to generate authentication tokens'
+      });
+    }
 
     // Create session
     const expiresAt = getTokenExpiration(process.env.JWT_REFRESH_EXPIRES_IN || '7d');
@@ -93,6 +112,7 @@ router.post('/register', async (req, res) => {
       path: '/',
     };
 
+    // 🔥 CRITICAL: Only set cookies if tokens are valid
     res.cookie('accessToken', accessToken, {
       ...cookieOptions,
       maxAge: 15 * 60 * 1000, // 15 minutes
@@ -101,6 +121,11 @@ router.post('/register', async (req, res) => {
     res.cookie('refreshToken', refreshToken, {
       ...cookieOptions,
       maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+    });
+    
+    console.log('[Auth Register] ✅ Cookies set successfully:', {
+      accessTokenLength: accessToken.length,
+      refreshTokenLength: refreshToken.length,
     });
 
     res.json({
