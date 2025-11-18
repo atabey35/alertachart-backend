@@ -2,13 +2,14 @@
  * Authentication middleware
  */
 
-import { verifyAccessToken } from './jwt.js';
+import { verifyAccessToken, verifyRefreshToken, generateAccessToken } from './jwt.js';
+import { getSessionByRefreshToken } from './db.js';
 
 /**
  * Middleware to verify JWT access token
  * Supports both Cookie-based (for web/Capacitor) and Authorization header (for native)
  */
-export function authenticateToken(req, res, next) {
+export async function authenticateToken(req, res, next) {
   // Try to get token from cookies first (for web/Capacitor), then from Authorization header (for native)
   let token = req.cookies?.accessToken;
   
@@ -62,9 +63,6 @@ export function authenticateToken(req, res, next) {
           refreshToken.length >= 10 &&
           refreshToken.split('.').length === 3) {
         try {
-          const { verifyRefreshToken, generateAccessToken } = await import('./jwt.js');
-          const { getSessionByRefreshToken } = await import('./db.js');
-          
           const refreshDecoded = verifyRefreshToken(refreshToken);
           const session = await getSessionByRefreshToken(refreshToken);
           
