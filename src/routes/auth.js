@@ -372,7 +372,7 @@ router.get('/me', async (req, res) => {
       });
     }
 
-    const { verifyAccessToken } = await import('../lib/auth/jwt.js');
+    const { verifyAccessToken, generateAccessToken, verifyRefreshToken } = await import('../lib/auth/jwt.js');
     
     // 🔥 DEBUG: Try to decode token to see what's wrong
     try {
@@ -414,7 +414,78 @@ router.get('/me', async (req, res) => {
         jwtParts: token.split('.').map((part, i) => `part${i}: ${part.length} chars`).join(', '),
       });
       
-      // Re-throw to be caught by outer catch
+      // 🔥 CRITICAL FIX: If access token is expired/invalid, try to refresh using refresh token
+      const refreshToken = req.cookies?.refreshToken;
+      
+      if (refreshToken && 
+          refreshToken !== 'undefined' && 
+          refreshToken !== 'null' &&
+          typeof refreshToken === 'string' &&
+          refreshToken.length >= 10 &&
+          refreshToken.split('.').length === 3) {
+        console.log(`[Auth /me] 🔄 Access token expired/invalid, attempting refresh with refresh token...`);
+        
+        try {
+          // Verify refresh token
+          const refreshDecoded = verifyRefreshToken(refreshToken);
+          
+          // Check session in database
+          const { getSessionByRefreshToken } = await import('../lib/auth/db.js');
+          const session = await getSessionByRefreshToken(refreshToken);
+          
+          if (session && session.user_id === refreshDecoded.userId) {
+            // Generate new access token
+            const newAccessToken = generateAccessToken(session.user_id, session.email);
+            
+            // Set new access token cookie
+            const isProduction = process.env.NODE_ENV === 'production';
+            const cookieOptions = {
+              httpOnly: true,
+              secure: isProduction,
+              sameSite: isProduction ? 'none' : 'lax',
+              domain: isProduction ? '.alertachart.com' : undefined,
+              path: '/',
+            };
+            
+            res.cookie('accessToken', newAccessToken, {
+              ...cookieOptions,
+              maxAge: 15 * 60 * 1000, // 15 minutes
+            });
+            
+            console.log(`[Auth /me] ✅ Token refreshed successfully: userId=${session.user_id}`);
+            
+            // Get user and return
+            const user = await getUserById(session.user_id);
+            if (!user) {
+              return res.status(404).json({
+                error: 'User not found'
+              });
+            }
+            
+            return res.json({
+              success: true,
+              user: {
+                id: user.id,
+                email: user.email,
+                name: user.name,
+                provider: user.provider,
+                plan: user.plan,
+                expiryDate: user.expiry_date,
+                createdAt: user.created_at,
+                lastLoginAt: user.last_login_at,
+              },
+            });
+          } else {
+            console.log(`[Auth /me] ❌ Session not found or invalid for refresh token`);
+          }
+        } catch (refreshError) {
+          console.error(`[Auth /me] ❌ Refresh token verification failed:`, refreshError.message);
+        }
+      } else {
+        console.log(`[Auth /me] ⚠️ No valid refresh token found for automatic refresh`);
+      }
+      
+      // Re-throw original error if refresh failed
       throw verifyError;
     }
   } catch (error) {
