@@ -300,45 +300,95 @@ router.get('/me', async (req, res) => {
   try {
     // Try to get token from cookies first (for web/Capacitor), then from Authorization header (for native)
     let token = req.cookies?.accessToken;
+    const tokenSource = token ? 'cookie' : null;
     
     if (!token) {
-    const authHeader = req.headers['authorization'];
+      const authHeader = req.headers['authorization'];
       token = authHeader && authHeader.split(' ')[1];
+      if (token) {
+        tokenSource = 'header';
+      }
     }
 
+    // 🔥 DEBUG: Log token info (without exposing full token)
+    console.log(`[Auth /me] Token check:`, {
+      hasCookie: !!req.cookies?.accessToken,
+      hasAuthHeader: !!req.headers['authorization'],
+      tokenLength: token ? token.length : 0,
+      tokenPreview: token ? `${token.substring(0, 20)}...${token.substring(token.length - 10)}` : 'none',
+      tokenSource: tokenSource || 'none',
+      cookieNames: req.cookies ? Object.keys(req.cookies).join(', ') : 'none',
+    });
+
     if (!token) {
+      console.log(`[Auth /me] ❌ No token found in cookies or Authorization header`);
       return res.status(401).json({
         error: 'Access token required'
       });
     }
 
     const { verifyAccessToken } = await import('../lib/auth/jwt.js');
-    const decoded = verifyAccessToken(token);
+    
+    // 🔥 DEBUG: Try to decode token to see what's wrong
+    try {
+      const decoded = verifyAccessToken(token);
+      console.log(`[Auth /me] ✅ Token verified: userId=${decoded.userId}, email=${decoded.email}`);
+      
+      const user = await getUserById(decoded.userId);
+      if (!user) {
+        console.log(`[Auth /me] ❌ User not found: userId=${decoded.userId}`);
+        return res.status(404).json({
+          error: 'User not found'
+        });
+      }
 
-    const user = await getUserById(decoded.userId);
-    if (!user) {
-      return res.status(404).json({
-        error: 'User not found'
+      console.log(`[Auth /me] ✅ User found: ${user.email} (ID: ${user.id})`);
+      
+      res.json({
+        success: true,
+        user: {
+          id: user.id,
+          email: user.email,
+          name: user.name,
+          provider: user.provider,
+          plan: user.plan,
+          expiryDate: user.expiry_date,
+          createdAt: user.created_at,
+          lastLoginAt: user.last_login_at,
+        },
       });
+    } catch (verifyError) {
+      // 🔥 DEBUG: Log detailed error info
+      console.error(`[Auth /me] ❌ Token verification failed:`, {
+        error: verifyError.message,
+        errorName: verifyError.name,
+        tokenLength: token.length,
+        tokenPreview: `${token.substring(0, 30)}...`,
+        // Check if it's a JWT format issue
+        isJWTFormat: token.split('.').length === 3,
+        jwtParts: token.split('.').map((part, i) => `part${i}: ${part.length} chars`).join(', '),
+      });
+      
+      // Re-throw to be caught by outer catch
+      throw verifyError;
     }
-
-    res.json({
-      success: true,
-      user: {
-        id: user.id,
-        email: user.email,
-        name: user.name,
-        provider: user.provider,
-        plan: user.plan,
-        expiryDate: user.expiry_date,
-        createdAt: user.created_at,
-        lastLoginAt: user.last_login_at,
-      },
-    });
   } catch (error) {
-    console.error('Error getting user info:', error);
+    console.error('[Auth /me] ❌ Error getting user info:', error);
+    console.error('[Auth /me] Error stack:', error.stack);
+    
+    // More specific error messages
+    let errorMessage = 'Invalid or expired token';
+    if (error.message.includes('expired')) {
+      errorMessage = 'Token has expired. Please login again.';
+    } else if (error.message.includes('invalid')) {
+      errorMessage = 'Invalid token format. Please login again.';
+    } else if (error.message.includes('secret')) {
+      errorMessage = 'Token verification failed. Server configuration issue.';
+    }
+    
     res.status(401).json({
-      error: 'Invalid or expired token'
+      error: errorMessage,
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
 });

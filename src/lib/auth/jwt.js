@@ -36,9 +36,50 @@ export function generateRefreshToken(userId, email) {
  */
 export function verifyAccessToken(token) {
   try {
-    return jwt.verify(token, JWT_SECRET);
+    // 🔥 DEBUG: Log token info before verification
+    if (process.env.NODE_ENV === 'development') {
+      console.log(`[JWT] Verifying token:`, {
+        tokenLength: token?.length || 0,
+        tokenPreview: token ? `${token.substring(0, 20)}...` : 'none',
+        hasSecret: !!JWT_SECRET,
+        secretLength: JWT_SECRET?.length || 0,
+      });
+    }
+    
+    const decoded = jwt.verify(token, JWT_SECRET);
+    
+    if (process.env.NODE_ENV === 'development') {
+      console.log(`[JWT] ✅ Token verified:`, {
+        userId: decoded.userId,
+        email: decoded.email,
+        type: decoded.type,
+        exp: decoded.exp,
+        expiresAt: decoded.exp ? new Date(decoded.exp * 1000).toISOString() : 'none',
+      });
+    }
+    
+    return decoded;
   } catch (error) {
-    throw new Error('Invalid or expired access token');
+    // 🔥 DEBUG: More detailed error info
+    if (process.env.NODE_ENV === 'development') {
+      console.error(`[JWT] ❌ Token verification failed:`, {
+        errorName: error.name,
+        errorMessage: error.message,
+        tokenLength: token?.length || 0,
+        tokenPreview: token ? `${token.substring(0, 30)}...` : 'none',
+        isExpired: error.name === 'TokenExpiredError',
+        isInvalid: error.name === 'JsonWebTokenError',
+      });
+    }
+    
+    // Preserve original error message for better debugging
+    if (error.name === 'TokenExpiredError') {
+      throw new Error('Token has expired');
+    } else if (error.name === 'JsonWebTokenError') {
+      throw new Error(`Invalid token: ${error.message}`);
+    } else {
+      throw new Error(`Token verification failed: ${error.message}`);
+    }
   }
 }
 
