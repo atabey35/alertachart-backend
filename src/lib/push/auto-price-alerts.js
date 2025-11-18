@@ -360,6 +360,14 @@ export class AutoPriceAlertService {
       }
 
       console.log(`🔍 Found ${devices.length} premium/trial device(s) from database query`);
+      
+      // DEBUG: Log all devices found
+      if (devices.length > 0) {
+        console.log(`📋 Devices breakdown:`);
+        devices.forEach((device, index) => {
+          console.log(`   ${index + 1}. ${device.email} (ID: ${device.user_id}) - Device: ${device.device_id}, Plan: ${device.plan}, Expiry: ${device.expiry_date || 'LIFETIME'}`);
+        });
+      }
 
       // Push token'ları topla
       // Support both Expo tokens and FCM tokens

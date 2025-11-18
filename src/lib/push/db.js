@@ -166,8 +166,9 @@ export async function getAllActiveDevices() {
  */
 export async function getPremiumTrialDevices() {
   const sql = getSql();
-  const now = new Date();
   
+  // Use CURRENT_TIMESTAMP for better PostgreSQL compatibility
+  // This ensures we're using database server time, not client time
   return await sql`
     SELECT 
       d.id,
@@ -190,19 +191,19 @@ export async function getPremiumTrialDevices() {
       AND d.user_id IS NOT NULL
       AND (
         -- Premium users (with or without expiry)
-        (u.plan = 'premium' AND (u.expiry_date IS NULL OR u.expiry_date > ${now}::timestamp))
+        (u.plan = 'premium' AND (u.expiry_date IS NULL OR u.expiry_date > CURRENT_TIMESTAMP))
         OR
         -- Trial users (active trial)
         (
           u.plan = 'free' 
           AND u.trial_started_at IS NOT NULL
-          AND u.trial_started_at <= ${now}::timestamp
+          AND u.trial_started_at <= CURRENT_TIMESTAMP
           AND (
             -- Trial ended_at yoksa, 3 gün hesapla
-            (u.trial_ended_at IS NULL AND (u.trial_started_at + INTERVAL '3 days') > ${now}::timestamp)
+            (u.trial_ended_at IS NULL AND (u.trial_started_at + INTERVAL '3 days') > CURRENT_TIMESTAMP)
             OR
             -- Trial ended_at varsa, kontrol et
-            (u.trial_ended_at IS NOT NULL AND u.trial_ended_at > ${now}::timestamp)
+            (u.trial_ended_at IS NOT NULL AND u.trial_ended_at > CURRENT_TIMESTAMP)
           )
         )
       )
