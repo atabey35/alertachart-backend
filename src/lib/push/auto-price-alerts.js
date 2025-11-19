@@ -231,19 +231,27 @@ export class AutoPriceAlertService {
         
         // Bildirim gönder: Cooldown OK + Triggered değil + Zona muerta dışında VEYA yukarı hareket + Yeni aşağı geçiş DEĞİL
         if ((!tooCloseToTarget || isMovingUp) && !justCrossedBelow) {
+          // 🔥 CRITICAL FIX: Trigger'ı ÖNCE işaretle (bildirim gönderilirken yeni kontrolleri engelle)
+          this.markTriggered(key);
+          this.markNotified(key);
+          
           console.log(`📈 ${name} ${nextLevelUp.toLocaleString()}$ seviyesine yaklaşıyor (şu an: ${currentPrice.toFixed(2)}$, mesafe: ${distanceToLevelUp.toFixed(2)}$)`);
           console.log(`   💡 Zona muerta: ${deadZoneUp.lower.toFixed(2)} - ${deadZoneUp.upper.toFixed(2)}, Hareket: ${isMovingUp ? '⬆️' : '⬇️'}`);
           
-          await this.sendNotificationToAll(
-            symbol,
-            name,
-            emoji,
-            currentPrice,
-            nextLevelUp,
-            'up'
-          );
-          this.markNotified(key);
-          this.markTriggered(key);
+          try {
+            await this.sendNotificationToAll(
+              symbol,
+              name,
+              emoji,
+              currentPrice,
+              nextLevelUp,
+              'up'
+            );
+          } catch (error) {
+            console.error(`❌ Error sending notification for ${symbol} ${nextLevelUp}$:`, error);
+            // Hata durumunda trigger'ı geri al (bir sonraki denemede tekrar gönderilebilir)
+            this.clearTriggered(key);
+          }
         } else if (justCrossedBelow) {
           console.log(`⏸️  ${name} seviyeyi yeni aşağı geçti (${currentPrice.toFixed(2)}$), "yaklaşıyor" bildirimi gönderilmedi`);
         } else {
@@ -275,19 +283,27 @@ export class AutoPriceAlertService {
         
         // Bildirim gönder: Cooldown OK + Triggered değil + Zona muerta dışında VEYA aşağı hareket + Yeni yukarı geçiş DEĞİL
         if ((!tooCloseToTarget || isMovingDown) && !justCrossedAbove) {
+          // 🔥 CRITICAL FIX: Trigger'ı ÖNCE işaretle (bildirim gönderilirken yeni kontrolleri engelle)
+          this.markTriggered(key);
+          this.markNotified(key);
+          
           console.log(`📉 ${name} ${nextLevelDown.toLocaleString()}$ seviyesine iniyor (şu an: ${currentPrice.toFixed(2)}$, mesafe: ${distanceToLevelDown.toFixed(2)}$)`);
           console.log(`   💡 Zona muerta: ${deadZoneDown.lower.toFixed(2)} - ${deadZoneDown.upper.toFixed(2)}, Hareket: ${isMovingDown ? '⬇️' : '⬆️'}`);
           
-          await this.sendNotificationToAll(
-            symbol,
-            name,
-            emoji,
-            currentPrice,
-            nextLevelDown,
-            'down'
-          );
-          this.markNotified(key);
-          this.markTriggered(key);
+          try {
+            await this.sendNotificationToAll(
+              symbol,
+              name,
+              emoji,
+              currentPrice,
+              nextLevelDown,
+              'down'
+            );
+          } catch (error) {
+            console.error(`❌ Error sending notification for ${symbol} ${nextLevelDown}$:`, error);
+            // Hata durumunda trigger'ı geri al (bir sonraki denemede tekrar gönderilebilir)
+            this.clearTriggered(key);
+          }
         } else if (justCrossedAbove) {
           console.log(`⏸️  ${name} seviyeyi yeni yukarı geçti (${currentPrice.toFixed(2)}$), "iniyor" bildirimi gönderilmedi`);
         } else {
