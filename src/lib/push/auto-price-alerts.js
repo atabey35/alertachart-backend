@@ -19,6 +19,7 @@ export class AutoPriceAlertService {
     this.lastNotifications = new Map(); // Symbol + level için son bildirim zamanı
     this.triggeredLevels = new Map(); // Trigger edilmiş seviyeler (tekrar etmemek için)
     this.customAlertsCache = new Map(); // Custom alert'ler için cache (symbol -> alerts[])
+    this.triggeredCustomAlerts = new Map(); // Trigger edilmiş custom alert'ler (alert_id -> timestamp)
     this.isRunning = false;
     this.customAlertsCheckInterval = null; // Custom alert'leri kontrol etmek için interval
     
@@ -533,7 +534,17 @@ export class AutoPriceAlertService {
     for (const alert of alerts) {
       const { id, target_price, proximity_delta, direction, expo_push_token, last_notified_at, last_price } = alert;
       
-      // Cooldown kontrolü (5 dakika)
+      // 🔥 CRITICAL: Check if this alert was already triggered recently (in-memory check)
+      const triggerKey = `custom_${id}`;
+      const lastTriggered = this.triggeredCustomAlerts.get(triggerKey);
+      if (lastTriggered) {
+        const timeSince = Date.now() - lastTriggered;
+        if (timeSince < this.NOTIFICATION_COOLDOWN) {
+          continue; // Already triggered recently, skip
+        }
+      }
+      
+      // Cooldown kontrolü (5 dakika) - database check
       if (last_notified_at) {
         const timeSince = Date.now() - new Date(last_notified_at).getTime();
         if (timeSince < this.NOTIFICATION_COOLDOWN) {
@@ -567,6 +578,9 @@ export class AutoPriceAlertService {
       }
       
       if (shouldNotify) {
+        // 🔥 CRITICAL: Mark as triggered BEFORE sending notification (prevent race condition)
+        this.triggeredCustomAlerts.set(triggerKey, Date.now());
+        
         // Bildirim gönder
         try {
           const success = await sendPriceAlertNotification(
@@ -581,9 +595,14 @@ export class AutoPriceAlertService {
             // Database'i güncelle
             await updatePriceAlertNotification(id, currentPrice);
             console.log(`✅ Custom alert triggered: ${symbol} @ ${target_price} (${direction}) for user ${alert.user_id}`);
+          } else {
+            // If notification failed, clear trigger to allow retry
+            this.triggeredCustomAlerts.delete(triggerKey);
           }
         } catch (error) {
           console.error(`❌ Error sending custom alert notification:`, error);
+          // If notification failed, clear trigger to allow retry
+          this.triggeredCustomAlerts.delete(triggerKey);
         }
       }
     }
