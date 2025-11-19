@@ -296,6 +296,23 @@ export async function createPriceAlert(deviceId, symbol, targetPrice, proximityD
     }
   }
   
+  // Check if device exists, if not create it (for web users)
+  const existingDevice = await sql`
+    SELECT id FROM devices WHERE device_id = ${deviceId}
+  `;
+  
+  if (existingDevice.length === 0) {
+    // Device doesn't exist, create it with placeholder token
+    // This is for web users who don't have push tokens
+    const platform = deviceId.startsWith('web-') ? 'web' : 'unknown';
+    await sql`
+      INSERT INTO devices (device_id, expo_push_token, platform, user_id, is_active)
+      VALUES (${deviceId}, ${'web-placeholder-token'}, ${platform}, ${userId}, true)
+      ON CONFLICT (device_id) DO NOTHING
+    `;
+    console.log(`[createPriceAlert] Created device record for ${deviceId} (web user)`);
+  }
+  
   const result = await sql`
     INSERT INTO price_alerts (device_id, user_id, symbol, target_price, proximity_delta, direction)
     VALUES (${deviceId}, ${userId}, ${symbol.toUpperCase()}, ${targetPrice}, ${proximityDelta}, ${direction})
