@@ -46,6 +46,16 @@ async function checkPremiumAccess(userId) {
  */
 router.post('/price', optionalAuth, async (req, res) => {
   try {
+    // Debug: Log authentication info
+    console.log('[Alerts POST] Request received:', {
+      hasCookies: !!req.cookies,
+      cookieNames: req.cookies ? Object.keys(req.cookies) : [],
+      hasAuthHeader: !!req.headers['authorization'],
+      hasUser: !!req.user,
+      userId: req.user?.userId,
+      userEmail: req.user?.email,
+    });
+
     const { deviceId, symbol, targetPrice, proximityDelta, direction } = req.body;
 
     // Validation
@@ -64,6 +74,9 @@ router.post('/price', optionalAuth, async (req, res) => {
     // Premium check
     const userId = req.user?.userId;
     if (!userId) {
+      console.log('[Alerts POST] ❌ No userId found in req.user');
+      console.log('[Alerts POST] req.user:', req.user);
+      console.log('[Alerts POST] req.cookies:', req.cookies);
       return res.status(401).json({
         error: 'Authentication required'
       });
