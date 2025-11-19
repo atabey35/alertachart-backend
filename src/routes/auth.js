@@ -266,6 +266,7 @@ router.post('/refresh', async (req, res) => {
 
     res.json({
       success: true,
+      accessToken, // Also return directly for convenience
       tokens: {
         accessToken,
         refreshToken, // Keep the same refresh token
