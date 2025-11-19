@@ -234,7 +234,8 @@ router.post('/login', async (req, res) => {
  */
 router.post('/refresh', async (req, res) => {
   try {
-    const { refreshToken } = req.body;
+    // Try to get refreshToken from body first, then from cookies
+    let refreshToken = req.body.refreshToken || req.cookies?.refreshToken;
 
     if (!refreshToken) {
       return res.status(400).json({
