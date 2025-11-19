@@ -75,16 +75,30 @@ router.post('/price', optionalAuth, async (req, res) => {
     // Premium check - if no user, try to refresh token
     let userId = req.user?.userId;
     
+    console.log('[Alerts POST] Checking token refresh:', {
+      hasUserId: !!userId,
+      hasRefreshToken: !!req.cookies?.refreshToken,
+      refreshTokenValue: req.cookies?.refreshToken ? `${req.cookies.refreshToken.substring(0, 20)}...` : 'none',
+    });
+    
     if (!userId && req.cookies?.refreshToken) {
+      console.log('[Alerts POST] 🔄 Attempting token refresh...');
       // Try to refresh access token from refresh token
       try {
         const refreshToken = req.cookies.refreshToken;
+        console.log('[Alerts POST] Verifying refresh token...');
         const decoded = verifyRefreshToken(refreshToken);
+        console.log('[Alerts POST] Refresh token verified, decoded:', { userId: decoded.userId, email: decoded.email });
+        
+        console.log('[Alerts POST] Getting session from database...');
         const session = await getSessionByRefreshToken(refreshToken);
+        console.log('[Alerts POST] Session result:', session ? { userId: session.user_id, email: session.email } : 'null');
         
         if (session) {
           // Generate new access token
           const accessToken = generateAccessToken(session.user_id, session.email);
+          console.log('[Alerts POST] Generated new access token');
+          
           // Set accessToken cookie
           res.cookie('accessToken', accessToken, {
             httpOnly: true,
@@ -95,11 +109,16 @@ router.post('/price', optionalAuth, async (req, res) => {
           });
           
           userId = session.user_id;
-          console.log('[Alerts POST] ✅ Token refreshed, userId:', userId);
+          console.log('[Alerts POST] ✅ Token refreshed successfully, userId:', userId);
+        } else {
+          console.log('[Alerts POST] ⚠️ Session not found in database');
         }
       } catch (refreshError) {
-        console.log('[Alerts POST] ⚠️ Token refresh failed:', refreshError.message);
+        console.log('[Alerts POST] ❌ Token refresh failed:', refreshError.message);
+        console.log('[Alerts POST] Refresh error stack:', refreshError.stack);
       }
+    } else if (!userId) {
+      console.log('[Alerts POST] ⚠️ No userId and no refreshToken available');
     }
     
     if (!userId) {
