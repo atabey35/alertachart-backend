@@ -401,6 +401,8 @@ router.get('/me', async (req, res) => {
           provider: user.provider,
           plan: user.plan,
           expiryDate: user.expiry_date,
+          trialStartedAt: user.trial_started_at,
+          trialEndedAt: user.trial_ended_at,
           createdAt: user.created_at,
           lastLoginAt: user.last_login_at,
         },
