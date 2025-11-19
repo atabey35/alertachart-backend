@@ -9,9 +9,8 @@ import {
   deletePriceAlert,
 } from '../lib/push/db.js';
 import { authenticateToken, optionalAuth } from '../lib/auth/middleware.js';
-import { getUserById } from '../lib/auth/db.js';
-import { generateAccessToken } from '../lib/auth/jwt.js';
-import { getSessionByRefreshToken, verifyRefreshToken } from '../lib/auth/jwt.js';
+import { getUserById, getSessionByRefreshToken } from '../lib/auth/db.js';
+import { generateAccessToken, verifyRefreshToken } from '../lib/auth/jwt.js';
 
 const router = express.Router();
 
