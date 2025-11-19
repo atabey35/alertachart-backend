@@ -2,8 +2,7 @@
  * Authentication middleware
  */
 
-import { verifyAccessToken, verifyRefreshToken, generateAccessToken } from './jwt.js';
-import { getSessionByRefreshToken } from './db.js';
+import { verifyAccessToken } from './jwt.js';
 
 /**
  * Middleware to verify JWT access token
@@ -52,50 +51,6 @@ export async function authenticateToken(req, res, next) {
     req.user = decoded; // { userId, email, type: 'access' }
     next();
   } catch (error) {
-    // 🔥 CRITICAL FIX: If token is expired/invalid, try to refresh using refresh token
-    if (error.message.includes('expired') || error.message.includes('Invalid')) {
-      const refreshToken = req.cookies?.refreshToken;
-      
-      if (refreshToken && 
-          refreshToken !== 'undefined' && 
-          refreshToken !== 'null' &&
-          typeof refreshToken === 'string' &&
-          refreshToken.length >= 10 &&
-          refreshToken.split('.').length === 3) {
-        try {
-          const refreshDecoded = verifyRefreshToken(refreshToken);
-          const session = await getSessionByRefreshToken(refreshToken);
-          
-          if (session && session.user_id === refreshDecoded.userId) {
-            const newAccessToken = generateAccessToken(session.user_id, session.email);
-            
-            const isProduction = process.env.NODE_ENV === 'production';
-            const cookieOptions = {
-              httpOnly: true,
-              secure: isProduction,
-              sameSite: isProduction ? 'none' : 'lax',
-              domain: isProduction ? '.alertachart.com' : undefined,
-              path: '/',
-            };
-            
-            res.cookie('accessToken', newAccessToken, {
-              ...cookieOptions,
-              maxAge: 15 * 60 * 1000, // 15 minutes
-            });
-            
-            console.log(`[authenticateToken] ✅ Token refreshed automatically: userId=${session.user_id}`);
-            
-            // Set user and continue
-            req.user = { userId: session.user_id, email: session.email, type: 'access' };
-            next();
-            return;
-          }
-        } catch (refreshError) {
-          console.error(`[authenticateToken] ❌ Refresh token verification failed:`, refreshError.message);
-        }
-      }
-    }
-    
     return res.status(403).json({ error: 'Invalid or expired token' });
   }
 }

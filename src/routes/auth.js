@@ -365,90 +365,11 @@ router.get('/me', async (req, res) => {
       cookieNames: req.cookies ? Object.keys(req.cookies).join(', ') : 'none',
     });
 
-    const { verifyAccessToken, generateAccessToken, verifyRefreshToken } = await import('../lib/auth/jwt.js');
+    const { verifyAccessToken } = await import('../lib/auth/jwt.js');
     
-    // 🔥 CRITICAL FIX: If no access token, try to refresh using refresh token
+    // If no token, return error
     if (!token) {
-      console.log(`[Auth /me] ⚠️ No access token found, attempting refresh with refresh token...`);
-      
-      const refreshToken = req.cookies?.refreshToken;
-      
-      if (refreshToken && 
-          refreshToken !== 'undefined' && 
-          refreshToken !== 'null' &&
-          typeof refreshToken === 'string' &&
-          refreshToken.length >= 10 &&
-          refreshToken.split('.').length === 3) {
-        try {
-          // Verify refresh token
-          const refreshDecoded = verifyRefreshToken(refreshToken);
-          
-          // Check session in database
-          const { getSessionByRefreshToken } = await import('../lib/auth/db.js');
-          const session = await getSessionByRefreshToken(refreshToken);
-          
-          if (session && session.user_id === refreshDecoded.userId) {
-            // Generate new access token
-            const newAccessToken = generateAccessToken(session.user_id, session.email);
-            
-            // Set new access token cookie
-            const isProduction = process.env.NODE_ENV === 'production';
-            const cookieOptions = {
-              httpOnly: true,
-              secure: isProduction,
-              sameSite: isProduction ? 'none' : 'lax',
-              domain: isProduction ? '.alertachart.com' : undefined,
-              path: '/',
-            };
-            
-            res.cookie('accessToken', newAccessToken, {
-              ...cookieOptions,
-              maxAge: 15 * 60 * 1000, // 15 minutes
-            });
-            
-            // 🔥 CRITICAL: Verify cookie was set correctly
-            console.log(`[Auth /me] ✅ Token refreshed successfully (no access token): userId=${session.user_id}`, {
-              tokenLength: newAccessToken.length,
-              cookieSet: true,
-              cookieOptions: {
-                httpOnly: cookieOptions.httpOnly,
-                secure: cookieOptions.secure,
-                sameSite: cookieOptions.sameSite,
-                domain: cookieOptions.domain,
-                path: cookieOptions.path,
-                maxAge: 15 * 60 * 1000,
-              },
-            });
-            
-            // Get user and return
-            const user = await getUserById(session.user_id);
-            if (!user) {
-              return res.status(404).json({
-                error: 'User not found'
-              });
-            }
-            
-            return res.json({
-              success: true,
-              user: {
-                id: user.id,
-                email: user.email,
-                name: user.name,
-                provider: user.provider,
-                plan: user.plan,
-                expiryDate: user.expiry_date,
-                createdAt: user.created_at,
-                lastLoginAt: user.last_login_at,
-              },
-            });
-          }
-        } catch (refreshError) {
-          console.error(`[Auth /me] ❌ Refresh token verification failed:`, refreshError.message);
-        }
-      }
-      
-      // If refresh failed or no refresh token, return error
-      console.log(`[Auth /me] ❌ No token found and refresh failed`);
+      console.log(`[Auth /me] ❌ No token found in cookies or Authorization header`);
       return res.status(401).json({
         error: 'Access token required'
       });
@@ -494,90 +415,7 @@ router.get('/me', async (req, res) => {
         jwtParts: token.split('.').map((part, i) => `part${i}: ${part.length} chars`).join(', '),
       });
       
-      // 🔥 CRITICAL FIX: If access token is expired/invalid, try to refresh using refresh token
-      const refreshToken = req.cookies?.refreshToken;
-      
-      if (refreshToken && 
-          refreshToken !== 'undefined' && 
-          refreshToken !== 'null' &&
-          typeof refreshToken === 'string' &&
-          refreshToken.length >= 10 &&
-          refreshToken.split('.').length === 3) {
-        console.log(`[Auth /me] 🔄 Access token expired/invalid, attempting refresh with refresh token...`);
-        
-        try {
-          // Verify refresh token
-          const refreshDecoded = verifyRefreshToken(refreshToken);
-          
-          // Check session in database
-          const { getSessionByRefreshToken } = await import('../lib/auth/db.js');
-          const session = await getSessionByRefreshToken(refreshToken);
-          
-          if (session && session.user_id === refreshDecoded.userId) {
-            // Generate new access token
-            const newAccessToken = generateAccessToken(session.user_id, session.email);
-            
-            // Set new access token cookie
-            const isProduction = process.env.NODE_ENV === 'production';
-            const cookieOptions = {
-              httpOnly: true,
-              secure: isProduction,
-              sameSite: isProduction ? 'none' : 'lax',
-              domain: isProduction ? '.alertachart.com' : undefined,
-              path: '/',
-            };
-            
-            res.cookie('accessToken', newAccessToken, {
-              ...cookieOptions,
-              maxAge: 15 * 60 * 1000, // 15 minutes
-            });
-            
-            // 🔥 CRITICAL: Verify cookie was set correctly
-            console.log(`[Auth /me] ✅ Token refreshed successfully: userId=${session.user_id}`, {
-              tokenLength: newAccessToken.length,
-              cookieSet: true,
-              cookieOptions: {
-                httpOnly: cookieOptions.httpOnly,
-                secure: cookieOptions.secure,
-                sameSite: cookieOptions.sameSite,
-                domain: cookieOptions.domain,
-                path: cookieOptions.path,
-                maxAge: 15 * 60 * 1000,
-              },
-            });
-            
-            // Get user and return
-            const user = await getUserById(session.user_id);
-            if (!user) {
-              return res.status(404).json({
-                error: 'User not found'
-              });
-            }
-            
-            return res.json({
-              success: true,
-              user: {
-                id: user.id,
-                email: user.email,
-                name: user.name,
-                provider: user.provider,
-                plan: user.plan,
-                expiryDate: user.expiry_date,
-                createdAt: user.created_at,
-                lastLoginAt: user.last_login_at,
-              },
-            });
-          } else {
-            console.log(`[Auth /me] ❌ Session not found or invalid for refresh token`);
-          }
-        } catch (refreshError) {
-          console.error(`[Auth /me] ❌ Refresh token verification failed:`, refreshError.message);
-        }
-      } else {
-        console.log(`[Auth /me] ⚠️ No valid refresh token found for automatic refresh`);
-      }
-      
-      // Re-throw original error if refresh failed
+      // Re-throw error (no automatic refresh)
       throw verifyError;
     }
   } catch (error) {
