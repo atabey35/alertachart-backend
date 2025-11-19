@@ -10,6 +10,8 @@ import {
 } from '../lib/push/db.js';
 import { authenticateToken, optionalAuth } from '../lib/auth/middleware.js';
 import { getUserById } from '../lib/auth/db.js';
+import { generateAccessToken } from '../lib/auth/jwt.js';
+import { getSessionByRefreshToken, verifyRefreshToken } from '../lib/auth/jwt.js';
 
 const router = express.Router();
 
@@ -71,8 +73,36 @@ router.post('/price', optionalAuth, async (req, res) => {
       });
     }
 
-    // Premium check
-    const userId = req.user?.userId;
+    // Premium check - if no user, try to refresh token
+    let userId = req.user?.userId;
+    
+    if (!userId && req.cookies?.refreshToken) {
+      // Try to refresh access token from refresh token
+      try {
+        const refreshToken = req.cookies.refreshToken;
+        const decoded = verifyRefreshToken(refreshToken);
+        const session = await getSessionByRefreshToken(refreshToken);
+        
+        if (session) {
+          // Generate new access token
+          const accessToken = generateAccessToken(session.user_id, session.email);
+          // Set accessToken cookie
+          res.cookie('accessToken', accessToken, {
+            httpOnly: true,
+            secure: process.env.NODE_ENV === 'production',
+            sameSite: 'lax',
+            path: '/',
+            maxAge: 15 * 60 * 1000, // 15 minutes
+          });
+          
+          userId = session.user_id;
+          console.log('[Alerts POST] ✅ Token refreshed, userId:', userId);
+        }
+      } catch (refreshError) {
+        console.log('[Alerts POST] ⚠️ Token refresh failed:', refreshError.message);
+      }
+    }
+    
     if (!userId) {
       console.log('[Alerts POST] ❌ No userId found in req.user');
       console.log('[Alerts POST] req.user:', req.user);
