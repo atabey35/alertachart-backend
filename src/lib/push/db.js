@@ -54,6 +54,7 @@ export async function initPushDatabase() {
       CREATE TABLE IF NOT EXISTS price_alerts (
         id SERIAL PRIMARY KEY,
         device_id VARCHAR(255) NOT NULL,
+        user_id INTEGER,
         symbol VARCHAR(50) NOT NULL,
         target_price DECIMAL(20, 8) NOT NULL,
         proximity_delta DECIMAL(20, 8) NOT NULL,
@@ -66,6 +67,28 @@ export async function initPushDatabase() {
         FOREIGN KEY (device_id) REFERENCES devices(device_id) ON DELETE CASCADE
       )
     `;
+    
+    // Add user_id column if it doesn't exist (migration)
+    try {
+      await sql`ALTER TABLE price_alerts ADD COLUMN IF NOT EXISTS user_id INTEGER`;
+      // Add foreign key constraint if it doesn't exist
+      await sql`
+        DO $$
+        BEGIN
+          IF NOT EXISTS (
+            SELECT 1 FROM pg_constraint 
+            WHERE conname = 'fk_price_alerts_user_id'
+          ) THEN
+            ALTER TABLE price_alerts 
+            ADD CONSTRAINT fk_price_alerts_user_id 
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE;
+          END IF;
+        END $$;
+      `;
+      console.log('✅ Price alerts table migration completed (user_id added)');
+    } catch (migrationError) {
+      console.log('ℹ️  Price alerts table already has user_id column');
+    }
 
     // Alarm subscriptions table
     await sql`
@@ -87,8 +110,10 @@ export async function initPushDatabase() {
     await sql`CREATE INDEX IF NOT EXISTS idx_devices_device_id ON devices(device_id)`;
     await sql`CREATE INDEX IF NOT EXISTS idx_devices_active ON devices(is_active)`;
     await sql`CREATE INDEX IF NOT EXISTS idx_price_alerts_device_id ON price_alerts(device_id)`;
+    await sql`CREATE INDEX IF NOT EXISTS idx_price_alerts_user_id ON price_alerts(user_id)`;
     await sql`CREATE INDEX IF NOT EXISTS idx_price_alerts_symbol ON price_alerts(symbol)`;
     await sql`CREATE INDEX IF NOT EXISTS idx_price_alerts_active ON price_alerts(is_active)`;
+    await sql`CREATE INDEX IF NOT EXISTS idx_price_alerts_symbol_active ON price_alerts(symbol, is_active)`;
     await sql`CREATE INDEX IF NOT EXISTS idx_alarm_subscriptions_device_id ON alarm_subscriptions(device_id)`;
     await sql`CREATE INDEX IF NOT EXISTS idx_alarm_subscriptions_alarm_key ON alarm_subscriptions(alarm_key)`;
 
@@ -258,18 +283,41 @@ export async function getPremiumTrialDevices() {
 }
 
 // Price alert operations
-export async function createPriceAlert(deviceId, symbol, targetPrice, proximityDelta, direction) {
+export async function createPriceAlert(deviceId, symbol, targetPrice, proximityDelta, direction, userId = null) {
   const sql = getSql();
+  
+  // If userId not provided, get it from device
+  if (!userId) {
+    const device = await sql`
+      SELECT user_id FROM devices WHERE device_id = ${deviceId}
+    `;
+    if (device[0]?.user_id) {
+      userId = device[0].user_id;
+    }
+  }
+  
   const result = await sql`
-    INSERT INTO price_alerts (device_id, symbol, target_price, proximity_delta, direction)
-    VALUES (${deviceId}, ${symbol.toUpperCase()}, ${targetPrice}, ${proximityDelta}, ${direction})
+    INSERT INTO price_alerts (device_id, user_id, symbol, target_price, proximity_delta, direction)
+    VALUES (${deviceId}, ${userId}, ${symbol.toUpperCase()}, ${targetPrice}, ${proximityDelta}, ${direction})
     RETURNING *
   `;
   return result[0];
 }
 
-export async function getPriceAlerts(deviceId) {
+export async function getPriceAlerts(deviceId, userId = null) {
   const sql = getSql();
+  
+  // If userId provided, filter by both deviceId and userId
+  if (userId) {
+    return await sql`
+      SELECT * FROM price_alerts
+      WHERE device_id = ${deviceId} 
+        AND user_id = ${userId}
+        AND is_active = true
+      ORDER BY created_at DESC
+    `;
+  }
+  
   return await sql`
     SELECT * FROM price_alerts
     WHERE device_id = ${deviceId} AND is_active = true
@@ -279,13 +327,89 @@ export async function getPriceAlerts(deviceId) {
 
 export async function getActivePriceAlertsBySymbol(symbol) {
   const sql = getSql();
+  
+  // Only return alerts for premium/trial users
   return await sql`
-    SELECT pa.*, d.expo_push_token, d.platform
+    SELECT 
+      pa.*, 
+      d.expo_push_token, 
+      d.platform,
+      d.user_id,
+      u.plan,
+      u.expiry_date,
+      u.trial_started_at,
+      u.trial_ended_at
     FROM price_alerts pa
     JOIN devices d ON pa.device_id = d.device_id
+    LEFT JOIN users u ON d.user_id = u.id
     WHERE pa.symbol = ${symbol.toUpperCase()}
       AND pa.is_active = true
       AND d.is_active = true
+      AND d.user_id IS NOT NULL
+      AND (
+        -- Premium users (with or without expiry)
+        (u.plan = 'premium' AND (u.expiry_date IS NULL OR u.expiry_date > CURRENT_TIMESTAMP))
+        OR
+        -- Trial users (active trial)
+        (
+          u.plan = 'free' 
+          AND u.trial_started_at IS NOT NULL
+          AND u.trial_started_at <= CURRENT_TIMESTAMP
+          AND (
+            -- Trial ended_at yoksa, 3 gün hesapla
+            (u.trial_ended_at IS NULL AND (u.trial_started_at + INTERVAL '3 days') > CURRENT_TIMESTAMP)
+            OR
+            -- Trial ended_at varsa, kontrol et
+            (u.trial_ended_at IS NOT NULL AND u.trial_ended_at > CURRENT_TIMESTAMP)
+          )
+        )
+      )
+  `;
+}
+
+/**
+ * Get all active custom price alerts (for all symbols)
+ * Used to discover which symbols need WebSocket connections
+ */
+export async function getAllActiveCustomAlerts() {
+  const sql = getSql();
+  
+  // Only return alerts for premium/trial users
+  return await sql`
+    SELECT 
+      pa.*, 
+      d.expo_push_token, 
+      d.platform,
+      d.user_id,
+      u.plan,
+      u.expiry_date,
+      u.trial_started_at,
+      u.trial_ended_at
+    FROM price_alerts pa
+    JOIN devices d ON pa.device_id = d.device_id
+    LEFT JOIN users u ON d.user_id = u.id
+    WHERE pa.is_active = true
+      AND d.is_active = true
+      AND d.user_id IS NOT NULL
+      AND (
+        -- Premium users (with or without expiry)
+        (u.plan = 'premium' AND (u.expiry_date IS NULL OR u.expiry_date > CURRENT_TIMESTAMP))
+        OR
+        -- Trial users (active trial)
+        (
+          u.plan = 'free' 
+          AND u.trial_started_at IS NOT NULL
+          AND u.trial_started_at <= CURRENT_TIMESTAMP
+          AND (
+            -- Trial ended_at yoksa, 3 gün hesapla
+            (u.trial_ended_at IS NULL AND (u.trial_started_at + INTERVAL '3 days') > CURRENT_TIMESTAMP)
+            OR
+            -- Trial ended_at varsa, kontrol et
+            (u.trial_ended_at IS NOT NULL AND u.trial_ended_at > CURRENT_TIMESTAMP)
+          )
+        )
+      )
+    ORDER BY pa.symbol, pa.created_at
   `;
 }
 

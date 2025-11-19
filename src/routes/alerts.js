@@ -8,14 +8,43 @@ import {
   getPriceAlerts,
   deletePriceAlert,
 } from '../lib/push/db.js';
+import { authenticateToken, optionalAuth } from '../lib/auth/middleware.js';
+import { getUserById } from '../lib/auth/db.js';
 
 const router = express.Router();
 
 /**
- * POST /api/alerts/price
- * Create new price alert
+ * Check if user has premium access
  */
-router.post('/price', async (req, res) => {
+async function checkPremiumAccess(userId) {
+  if (!userId) return false;
+  
+  const user = await getUserById(userId);
+  if (!user) return false;
+  
+  // Premium users (with or without expiry)
+  if (user.plan === 'premium') {
+    if (!user.expiry_date) return true; // Lifetime premium
+    return new Date(user.expiry_date) > new Date();
+  }
+  
+  // Trial users (active trial)
+  if (user.plan === 'free' && user.trial_started_at) {
+    const trialEnd = user.trial_ended_at 
+      ? new Date(user.trial_ended_at)
+      : new Date(new Date(user.trial_started_at).getTime() + 3 * 24 * 60 * 60 * 1000); // 3 days
+    
+    return new Date() < trialEnd;
+  }
+  
+  return false;
+}
+
+/**
+ * POST /api/alerts/price
+ * Create new price alert (PREMIUM ONLY)
+ */
+router.post('/price', optionalAuth, async (req, res) => {
   try {
     const { deviceId, symbol, targetPrice, proximityDelta, direction } = req.body;
 
@@ -32,15 +61,31 @@ router.post('/price', async (req, res) => {
       });
     }
 
+    // Premium check
+    const userId = req.user?.userId;
+    if (!userId) {
+      return res.status(401).json({
+        error: 'Authentication required'
+      });
+    }
+
+    const hasPremium = await checkPremiumAccess(userId);
+    if (!hasPremium) {
+      return res.status(403).json({
+        error: 'Premium subscription required for custom coin alerts'
+      });
+    }
+
     const alert = await createPriceAlert(
       deviceId,
       symbol,
       parseFloat(targetPrice),
       parseFloat(proximityDelta),
-      direction
+      direction,
+      userId
     );
 
-    console.log(`✅ Price alert created: ${symbol} @ ${targetPrice} (${direction})`);
+    console.log(`✅ Price alert created: ${symbol} @ ${targetPrice} (${direction}) for user ${userId}`);
 
     res.json({ success: true, alert });
   } catch (error) {
@@ -53,9 +98,9 @@ router.post('/price', async (req, res) => {
 
 /**
  * GET /api/alerts/price?deviceId=xxx
- * Get all price alerts for device
+ * Get all price alerts for device (PREMIUM ONLY)
  */
-router.get('/price', async (req, res) => {
+router.get('/price', optionalAuth, async (req, res) => {
   try {
     const { deviceId } = req.query;
 
@@ -63,7 +108,22 @@ router.get('/price', async (req, res) => {
       return res.status(400).json({ error: 'Missing deviceId' });
     }
 
-    const alerts = await getPriceAlerts(deviceId);
+    // Premium check
+    const userId = req.user?.userId;
+    if (!userId) {
+      return res.status(401).json({
+        error: 'Authentication required'
+      });
+    }
+
+    const hasPremium = await checkPremiumAccess(userId);
+    if (!hasPremium) {
+      return res.status(403).json({
+        error: 'Premium subscription required'
+      });
+    }
+
+    const alerts = await getPriceAlerts(deviceId, userId);
 
     res.json({ alerts });
   } catch (error) {
@@ -76,15 +136,40 @@ router.get('/price', async (req, res) => {
 
 /**
  * DELETE /api/alerts/price
- * Delete price alert
+ * Delete price alert (PREMIUM ONLY)
  */
-router.delete('/price', async (req, res) => {
+router.delete('/price', optionalAuth, async (req, res) => {
   try {
     const { id, deviceId } = req.body;
 
     if (!id || !deviceId) {
       return res.status(400).json({
         error: 'Missing id or deviceId'
+      });
+    }
+
+    // Premium check
+    const userId = req.user?.userId;
+    if (!userId) {
+      return res.status(401).json({
+        error: 'Authentication required'
+      });
+    }
+
+    const hasPremium = await checkPremiumAccess(userId);
+    if (!hasPremium) {
+      return res.status(403).json({
+        error: 'Premium subscription required'
+      });
+    }
+
+    // Verify alert belongs to user
+    const alerts = await getPriceAlerts(deviceId, userId);
+    const alert = alerts.find(a => a.id === parseInt(id));
+    
+    if (!alert) {
+      return res.status(404).json({
+        error: 'Alert not found or access denied'
       });
     }
 

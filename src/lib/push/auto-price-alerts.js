@@ -4,7 +4,7 @@
  */
 
 import WebSocket from 'ws';
-import { getPremiumTrialDevices } from './db.js';
+import { getPremiumTrialDevices, getActivePriceAlertsBySymbol, getAllActiveCustomAlerts, updatePriceAlertNotification } from './db.js';
 import { sendPriceAlertNotification } from './unified-push.js';
 
 /**
@@ -18,7 +18,9 @@ export class AutoPriceAlertService {
     this.prevPriceCache = new Map(); // Önceki fiyatları sakla (zona muerta için)
     this.lastNotifications = new Map(); // Symbol + level için son bildirim zamanı
     this.triggeredLevels = new Map(); // Trigger edilmiş seviyeler (tekrar etmemek için)
+    this.customAlertsCache = new Map(); // Custom alert'ler için cache (symbol -> alerts[])
     this.isRunning = false;
+    this.customAlertsCheckInterval = null; // Custom alert'leri kontrol etmek için interval
     
     // COOLDOWN: Aynı seviye için 5 dakika bekle (15 dakikaydı, çok uzundu)
     this.NOTIFICATION_COOLDOWN = 5 * 60 * 1000; // 5 dakika
@@ -85,6 +87,16 @@ export class AutoPriceAlertService {
     Object.keys(this.watchList).forEach(symbol => {
       this.connectToSymbol(symbol);
     });
+    
+    // Custom alert'leri yükle ve dinlemeye başla
+    this.loadCustomAlerts();
+    
+    // Her 30 saniyede bir custom alert'leri yeniden yükle (yeni alert'ler için)
+    this.customAlertsCheckInterval = setInterval(() => {
+      if (this.isRunning) {
+        this.loadCustomAlerts();
+      }
+    }, 30000); // 30 saniye
   }
 
   /**
@@ -95,6 +107,12 @@ export class AutoPriceAlertService {
 
     this.isRunning = false;
 
+    // Custom alert check interval'ı temizle
+    if (this.customAlertsCheckInterval) {
+      clearInterval(this.customAlertsCheckInterval);
+      this.customAlertsCheckInterval = null;
+    }
+
     // WebSocket bağlantılarını kapat
     this.wsConnections.forEach((ws) => {
       if (ws.readyState === WebSocket.OPEN) {
@@ -102,6 +120,7 @@ export class AutoPriceAlertService {
       }
     });
     this.wsConnections.clear();
+    this.customAlertsCache.clear();
 
     console.log('🛑 Auto price alert service stopped');
   }
@@ -139,6 +158,8 @@ export class AutoPriceAlertService {
             // Fiyat değiştiğinde kontrol et
             if (oldPrice !== price) {
               this.checkPriceLevel(symbol, price);
+              // Custom alert'leri de kontrol et
+              this.checkCustomAlerts(symbol, price);
             }
           }
         } catch (error) {
@@ -463,11 +484,118 @@ export class AutoPriceAlertService {
   }
 
   /**
+   * Custom alert'leri yükle ve WebSocket bağlantılarını kur
+   */
+  async loadCustomAlerts() {
+    try {
+      const alerts = await getAllActiveCustomAlerts();
+      
+      // Symbol bazında grupla
+      const alertsBySymbol = new Map();
+      alerts.forEach(alert => {
+        const symbol = alert.symbol.toUpperCase();
+        if (!alertsBySymbol.has(symbol)) {
+          alertsBySymbol.set(symbol, []);
+        }
+        alertsBySymbol.get(symbol).push(alert);
+      });
+      
+      // Cache'i güncelle
+      this.customAlertsCache = alertsBySymbol;
+      
+      // Yeni symbol'ler için WebSocket bağlantısı kur
+      alertsBySymbol.forEach((alerts, symbol) => {
+        if (!this.wsConnections.has(symbol)) {
+          console.log(`🔔 Connecting to custom alert symbol: ${symbol} (${alerts.length} alert(s))`);
+          this.connectToSymbol(symbol);
+        }
+      });
+      
+      // Kullanılmayan symbol'leri temizle (alert yoksa bağlantıyı kapatma - mevcut sistem için)
+      // Not: Mevcut sistem coin'leri (BTC, ETH, SOL, BNB) her zaman açık kalmalı
+      
+      const customSymbolCount = alertsBySymbol.size;
+      if (customSymbolCount > 0) {
+        console.log(`📊 Loaded ${alerts.length} custom alert(s) for ${customSymbolCount} symbol(s)`);
+      }
+    } catch (error) {
+      console.error('❌ Error loading custom alerts:', error);
+    }
+  }
+
+  /**
+   * Custom alert'leri kontrol et ve bildirim gönder
+   */
+  async checkCustomAlerts(symbol, currentPrice) {
+    const alerts = this.customAlertsCache.get(symbol.toUpperCase());
+    if (!alerts || alerts.length === 0) return;
+    
+    for (const alert of alerts) {
+      const { id, target_price, proximity_delta, direction, expo_push_token, last_notified_at, last_price } = alert;
+      
+      // Cooldown kontrolü (5 dakika)
+      if (last_notified_at) {
+        const timeSince = Date.now() - new Date(last_notified_at).getTime();
+        if (timeSince < this.NOTIFICATION_COOLDOWN) {
+          continue;
+        }
+      }
+      
+      // Yaklaşma kontrolü
+      let shouldNotify = false;
+      
+      if (direction === 'up') {
+        // Yukarı yönlü: Fiyat hedefin altında ama yaklaşıyor
+        const distance = target_price - currentPrice;
+        if (distance > 0 && distance <= proximity_delta) {
+          // Önceki fiyat kontrolü (spam önleme)
+          if (last_price && last_price >= target_price - proximity_delta && last_price < target_price) {
+            continue; // Zaten bildirim gönderilmiş
+          }
+          shouldNotify = true;
+        }
+      } else {
+        // Aşağı yönlü: Fiyat hedefin üstünde ama yaklaşıyor
+        const distance = currentPrice - target_price;
+        if (distance > 0 && distance <= proximity_delta) {
+          // Önceki fiyat kontrolü (spam önleme)
+          if (last_price && last_price <= target_price + proximity_delta && last_price > target_price) {
+            continue; // Zaten bildirim gönderilmiş
+          }
+          shouldNotify = true;
+        }
+      }
+      
+      if (shouldNotify) {
+        // Bildirim gönder
+        try {
+          const success = await sendPriceAlertNotification(
+            [expo_push_token],
+            symbol,
+            currentPrice,
+            target_price,
+            direction
+          );
+          
+          if (success) {
+            // Database'i güncelle
+            await updatePriceAlertNotification(id, currentPrice);
+            console.log(`✅ Custom alert triggered: ${symbol} @ ${target_price} (${direction}) for user ${alert.user_id}`);
+          }
+        } catch (error) {
+          console.error(`❌ Error sending custom alert notification:`, error);
+        }
+      }
+    }
+  }
+
+  /**
    * Aktif bağlantılar ve fiyatlar
    */
   getStatus() {
     const status = {};
     
+    // Mevcut sistem coin'leri
     Object.keys(this.watchList).forEach(symbol => {
       const price = this.priceCache.get(symbol);
       const connected = this.wsConnections.has(symbol);
@@ -476,7 +604,26 @@ export class AutoPriceAlertService {
         price: price || null,
         connected: connected,
         config: this.watchList[symbol],
+        type: 'auto',
       };
+    });
+    
+    // Custom alert coin'leri
+    this.customAlertsCache.forEach((alerts, symbol) => {
+      if (!status[symbol]) {
+        const price = this.priceCache.get(symbol);
+        const connected = this.wsConnections.has(symbol);
+        
+        status[symbol] = {
+          price: price || null,
+          connected: connected,
+          alertCount: alerts.length,
+          type: 'custom',
+        };
+      } else {
+        status[symbol].alertCount = alerts.length;
+        status[symbol].type = 'both';
+      }
     });
     
     return status;
