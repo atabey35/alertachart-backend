@@ -1,8 +1,8 @@
 /**
- * Push notification database operations (Neon PostgreSQL)
+ * Push notification database operations (Railway PostgreSQL)
  */
 
-import { neon } from '@neondatabase/serverless';
+import postgres from 'postgres';
 
 let sql = null;
 
@@ -11,7 +11,15 @@ function getSql() {
     if (!process.env.DATABASE_URL) {
       throw new Error('DATABASE_URL environment variable is not set');
     }
-    sql = neon(process.env.DATABASE_URL);
+    // Check if it's a Neon connection string
+    const isNeon = process.env.DATABASE_URL.includes('.neon.tech');
+    
+    sql = postgres(process.env.DATABASE_URL, {
+      ssl: isNeon ? 'prefer' : 'require', // Neon uses 'prefer', Railway uses 'require'
+      max: 20, // Connection pool size
+      idle_timeout: 30,
+      connect_timeout: 10,
+    });
   }
   return sql;
 }
