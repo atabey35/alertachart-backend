@@ -126,6 +126,71 @@ export async function initAuthDatabase() {
       console.log('Note: alarm_subscriptions.user_id column/constraint might already exist');
     }
 
+    // Migration: Recreate device_id column with UNIQUE constraint
+    // This ensures each device_id can only belong to one user
+    try {
+      // Check if device_id column exists
+      const columnExists = await sql`
+        SELECT column_name 
+        FROM information_schema.columns 
+        WHERE table_name = 'users' 
+          AND column_name = 'device_id'
+      `;
+      
+      if (columnExists.length > 0) {
+        console.log('🔄 Dropping existing device_id column...');
+        // Drop the column (this will fail if there are constraints, so we handle it)
+        try {
+          await sql`ALTER TABLE users DROP COLUMN device_id`;
+          console.log('✅ device_id column dropped');
+        } catch (dropError: any) {
+          // If column has constraints, drop them first
+          if (dropError.message?.includes('constraint') || dropError.code === '2BP01') {
+            console.log('⚠️ device_id has constraints, dropping them first...');
+            // Try to drop unique constraint if exists
+            try {
+              await sql`ALTER TABLE users DROP CONSTRAINT IF EXISTS users_device_id_key`;
+            } catch (e) {
+              // Ignore if constraint doesn't exist
+            }
+            // Try again
+            await sql`ALTER TABLE users DROP COLUMN device_id`;
+            console.log('✅ device_id column dropped after removing constraints');
+          } else {
+            throw dropError;
+          }
+        }
+      }
+      
+      // Create device_id column with UNIQUE constraint
+      console.log('🔄 Creating device_id column with UNIQUE constraint...');
+      await sql`ALTER TABLE users ADD COLUMN device_id TEXT UNIQUE`;
+      console.log('✅ device_id column created with UNIQUE constraint');
+    } catch (migrationError: any) {
+      // Column might already exist with different structure, or error occurred
+      console.error('❌ device_id column migration error:', migrationError.message);
+      // Try to add unique constraint if column exists but doesn't have it
+      try {
+        const hasUnique = await sql`
+          SELECT constraint_name 
+          FROM information_schema.table_constraints 
+          WHERE table_name = 'users' 
+            AND constraint_type = 'UNIQUE' 
+            AND constraint_name LIKE '%device_id%'
+        `;
+        if (hasUnique.length === 0) {
+          console.log('🔄 Adding UNIQUE constraint to existing device_id column...');
+          await sql`ALTER TABLE users ADD CONSTRAINT users_device_id_unique UNIQUE (device_id)`;
+          console.log('✅ UNIQUE constraint added to device_id');
+        } else {
+          console.log('✅ device_id already has UNIQUE constraint');
+        }
+      } catch (constraintError: any) {
+        console.warn('⚠️ Could not add UNIQUE constraint:', constraintError.message);
+        // Continue anyway - column exists, just without unique constraint
+      }
+    }
+
     // Create indexes
     await sql`CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)`;
     await sql`CREATE INDEX IF NOT EXISTS idx_users_active ON users(is_active)`;
