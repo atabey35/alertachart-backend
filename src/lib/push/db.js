@@ -1,8 +1,8 @@
 /**
- * Push notification database operations (Railway PostgreSQL)
+ * Push notification database operations (Neon PostgreSQL)
  */
 
-import postgres from 'postgres';
+import { neon } from '@neondatabase/serverless';
 
 let sql = null;
 
@@ -11,15 +11,7 @@ function getSql() {
     if (!process.env.DATABASE_URL) {
       throw new Error('DATABASE_URL environment variable is not set');
     }
-    // Check if it's a Neon connection string
-    const isNeon = process.env.DATABASE_URL.includes('.neon.tech');
-    
-    sql = postgres(process.env.DATABASE_URL, {
-      ssl: isNeon ? 'prefer' : 'require', // Neon uses 'prefer', Railway uses 'require'
-      max: 20, // Connection pool size
-      idle_timeout: 30,
-      connect_timeout: 10,
-    });
+    sql = neon(process.env.DATABASE_URL);
   }
   return sql;
 }
@@ -248,6 +240,10 @@ export async function getPremiumTrialDevices() {
   
   // Use CURRENT_TIMESTAMP for better PostgreSQL compatibility
   // This ensures we're using database server time, not client time
+  // 🔥 APPLE GUIDELINE 5.1.1: Support guest users via device_id matching
+  // JOIN logic:
+  // - Normal users: d.user_id = u.id
+  // - Guest users: d.device_id = u.device_id AND u.provider = 'guest'
   return await sql`
     SELECT 
       d.id,
@@ -264,10 +260,15 @@ export async function getPremiumTrialDevices() {
       u.trial_ended_at,
       u.email
     FROM devices d
-    INNER JOIN users u ON d.user_id = u.id
+    INNER JOIN users u ON (
+      -- Normal users: match by user_id
+      (d.user_id IS NOT NULL AND d.user_id = u.id)
+      OR
+      -- Guest users: match by device_id
+      (d.user_id IS NULL AND d.device_id = u.device_id AND u.provider = 'guest')
+    )
     WHERE d.is_active = true
       AND u.is_active = true
-      AND d.user_id IS NOT NULL
       AND (
         -- Premium users (with or without expiry)
         (u.plan = 'premium' AND (u.expiry_date IS NULL OR u.expiry_date > CURRENT_TIMESTAMP))
@@ -286,7 +287,7 @@ export async function getPremiumTrialDevices() {
           )
         )
       )
-    ORDER BY d.user_id, d.id
+    ORDER BY COALESCE(d.user_id, u.id), d.id
   `;
 }
 
