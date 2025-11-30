@@ -54,6 +54,15 @@ export async function initPushDatabase() {
       console.log('ℹ️  Devices table already has new columns');
     }
 
+    // Migration: Make expo_push_token nullable (device can be created without push token)
+    try {
+      await sql`ALTER TABLE devices ALTER COLUMN expo_push_token DROP NOT NULL`;
+      console.log('✅ expo_push_token column is now nullable');
+    } catch (migrationError) {
+      // Column might already be nullable, or error occurred
+      console.log('ℹ️  expo_push_token column migration (already nullable or error):', migrationError.message);
+    }
+
     // Price alerts table
     await sql`
       CREATE TABLE IF NOT EXISTS price_alerts (
@@ -140,11 +149,12 @@ export async function upsertDevice(deviceId, expoPushToken, platform, appVersion
   // But if existing user_id is NULL and userId is provided, we want to link it!
   // 🔥 FIX: Handle null values for model, osVersion, and appVersion to avoid PostgreSQL type inference errors
   // Use explicit ::text casts for all string parameters
+  // 🔥 FIX: expo_push_token can be null (device can be created without push token initially)
   const result = await sql`
     INSERT INTO devices (device_id, expo_push_token, platform, app_version, user_id, model, os_version, updated_at)
     VALUES (
       ${deviceId}, 
-      ${expoPushToken}, 
+      ${expoPushToken || null}, 
       ${platform}::text, 
       ${appVersion || '1.0.0'}::text, 
       ${userId}, 
