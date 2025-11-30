@@ -55,12 +55,31 @@ export async function initPushDatabase() {
     }
 
     // Migration: Make expo_push_token nullable (device can be created without push token)
+    // This is CRITICAL - devices can be created without push token initially
     try {
-      await sql`ALTER TABLE devices ALTER COLUMN expo_push_token DROP NOT NULL`;
-      console.log('✅ expo_push_token column is now nullable');
+      // Check if column is currently NOT NULL by attempting to query the constraint
+      const constraintCheck = await sql`
+        SELECT 
+          column_name, 
+          is_nullable 
+        FROM information_schema.columns 
+        WHERE table_name = 'devices' 
+          AND column_name = 'expo_push_token'
+      `;
+      
+      if (constraintCheck.length > 0 && constraintCheck[0].is_nullable === 'NO') {
+        console.log('🔄 Making expo_push_token nullable...');
+        await sql`ALTER TABLE devices ALTER COLUMN expo_push_token DROP NOT NULL`;
+        console.log('✅ expo_push_token column is now nullable');
+      } else if (constraintCheck.length > 0 && constraintCheck[0].is_nullable === 'YES') {
+        console.log('✅ expo_push_token column is already nullable');
+      } else {
+        console.log('⚠️  Could not find expo_push_token column in information_schema');
+      }
     } catch (migrationError) {
-      // Column might already be nullable, or error occurred
-      console.log('ℹ️  expo_push_token column migration (already nullable or error):', migrationError.message);
+      console.error('❌ expo_push_token column migration error:', migrationError.message);
+      console.error('Migration error details:', migrationError);
+      // Continue anyway - migration might have partially succeeded
     }
 
     // Price alerts table
