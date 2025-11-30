@@ -17,6 +17,7 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
+    "@neondatabase/serverless": "^1.0.2",
     "apple-signin-auth": "^2.0.0",
     "bcryptjs": "^3.0.3",
     "cookie-parser": "^1.4.6",
