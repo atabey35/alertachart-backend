@@ -694,11 +694,61 @@ router.post('/google-native', async (req, res) => {
     let user = await getUserByEmail(userEmail);
     
     if (!user) {
-      // Create new user with random password (OAuth users don't need password)
-      const randomPassword = crypto.randomBytes(32).toString('hex');
-      const passwordHash = await hashPassword(randomPassword);
-      user = await createUser(userEmail, passwordHash, userName || null, 'google', payload.sub, deviceId);
-      console.log('[Google Native] Created new user:', userEmail, deviceId ? `with deviceId: ${deviceId}` : 'without deviceId');
+      // 🔥 CRITICAL: Check if deviceId is already used by another user
+      // If deviceId exists and belongs to a guest user, convert that user instead of creating new
+      if (deviceId) {
+        const sql = getSql();
+        const existingDeviceUser = await sql`
+          SELECT id, email, provider, plan
+          FROM users 
+          WHERE device_id = ${deviceId}
+          LIMIT 1
+        `;
+        
+        if (existingDeviceUser.length > 0) {
+          const existingUser = existingDeviceUser[0];
+          console.log('[Google Native] 🔄 deviceId already exists, found user:', existingUser.email, 'provider:', existingUser.provider);
+          
+          // If it's a guest user, convert it to Google user
+          if (existingUser.provider === 'guest') {
+            console.log('[Google Native] 🔄 Converting guest user to Google user...');
+            const randomPassword = crypto.randomBytes(32).toString('hex');
+            const passwordHash = await hashPassword(randomPassword);
+            
+            await sql`
+              UPDATE users 
+              SET 
+                email = ${userEmail},
+                name = ${userName || null},
+                provider = 'google',
+                provider_user_id = ${payload.sub},
+                password_hash = ${passwordHash},
+                updated_at = NOW()
+              WHERE id = ${existingUser.id}
+            `;
+            
+            user = await getUserByEmail(userEmail);
+            console.log('[Google Native] ✅ Converted guest user to Google user:', userEmail);
+          } else {
+            // DeviceId belongs to a non-guest user - remove device_id from old user
+            console.log('[Google Native] ⚠️ deviceId belongs to non-guest user, removing device_id from old user...');
+            await sql`
+              UPDATE users 
+              SET device_id = NULL
+              WHERE id = ${existingUser.id}
+            `;
+            console.log('[Google Native] ✅ Removed device_id from old user');
+          }
+        }
+      }
+      
+      // Create new user only if still doesn't exist
+      if (!user) {
+        const randomPassword = crypto.randomBytes(32).toString('hex');
+        const passwordHash = await hashPassword(randomPassword);
+        user = await createUser(userEmail, passwordHash, userName || null, 'google', payload.sub, deviceId);
+        console.log('[Google Native] Created new user:', userEmail, deviceId ? `with deviceId: ${deviceId}` : 'without deviceId');
+      }
       
       // Verify device_id was saved to users table
       if (deviceId) {
@@ -831,11 +881,61 @@ router.post('/apple-native', async (req, res) => {
     let user = await getUserByEmail(userEmail);
     
     if (!user) {
-      // Create new user with random password (OAuth users don't need password)
-      const randomPassword = crypto.randomBytes(32).toString('hex');
-      const passwordHash = await hashPassword(randomPassword);
-      user = await createUser(userEmail, passwordHash, userName || null, 'apple', appleUser.sub, deviceId);
-      console.log('[Apple Native] Created new user:', userEmail, deviceId ? `with deviceId: ${deviceId}` : 'without deviceId');
+      // 🔥 CRITICAL: Check if deviceId is already used by another user
+      // If deviceId exists and belongs to a guest user, convert that user instead of creating new
+      if (deviceId) {
+        const sql = getSql();
+        const existingDeviceUser = await sql`
+          SELECT id, email, provider, plan
+          FROM users 
+          WHERE device_id = ${deviceId}
+          LIMIT 1
+        `;
+        
+        if (existingDeviceUser.length > 0) {
+          const existingUser = existingDeviceUser[0];
+          console.log('[Apple Native] 🔄 deviceId already exists, found user:', existingUser.email, 'provider:', existingUser.provider);
+          
+          // If it's a guest user, convert it to Apple user
+          if (existingUser.provider === 'guest') {
+            console.log('[Apple Native] 🔄 Converting guest user to Apple user...');
+            const randomPassword = crypto.randomBytes(32).toString('hex');
+            const passwordHash = await hashPassword(randomPassword);
+            
+            await sql`
+              UPDATE users 
+              SET 
+                email = ${userEmail},
+                name = ${userName || null},
+                provider = 'apple',
+                provider_user_id = ${appleUser.sub},
+                password_hash = ${passwordHash},
+                updated_at = NOW()
+              WHERE id = ${existingUser.id}
+            `;
+            
+            user = await getUserByEmail(userEmail);
+            console.log('[Apple Native] ✅ Converted guest user to Apple user:', userEmail);
+          } else {
+            // DeviceId belongs to a non-guest user - remove device_id from old user
+            console.log('[Apple Native] ⚠️ deviceId belongs to non-guest user, removing device_id from old user...');
+            await sql`
+              UPDATE users 
+              SET device_id = NULL
+              WHERE id = ${existingUser.id}
+            `;
+            console.log('[Apple Native] ✅ Removed device_id from old user');
+          }
+        }
+      }
+      
+      // Create new user only if still doesn't exist
+      if (!user) {
+        const randomPassword = crypto.randomBytes(32).toString('hex');
+        const passwordHash = await hashPassword(randomPassword);
+        user = await createUser(userEmail, passwordHash, userName || null, 'apple', appleUser.sub, deviceId);
+        console.log('[Apple Native] Created new user:', userEmail, deviceId ? `with deviceId: ${deviceId}` : 'without deviceId');
+      }
       
       // Verify device_id was saved to users table
       if (deviceId) {
