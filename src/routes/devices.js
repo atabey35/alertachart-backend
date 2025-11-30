@@ -195,6 +195,14 @@ router.post('/link', authenticateToken, async (req, res) => {
       console.log(`✅ Device ${deviceId} linked to user ${userId}`);
     }
 
+    // Final verification: Check if device is properly linked
+    const finalCheck = await getDevice(deviceId);
+    if (finalCheck && finalCheck.user_id === userId) {
+      console.log(`✅ [Device Link] VERIFIED: Device ${deviceId} is properly linked to user ${userId}`);
+    } else {
+      console.warn(`⚠️ [Device Link] WARNING: Device ${deviceId} link verification failed. Expected userId: ${userId}, Got: ${finalCheck?.user_id}`);
+    }
+
     res.json({
       success: true,
       device: {

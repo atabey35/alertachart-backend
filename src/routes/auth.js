@@ -699,6 +699,16 @@ router.post('/google-native', async (req, res) => {
       const passwordHash = await hashPassword(randomPassword);
       user = await createUser(userEmail, passwordHash, userName || null, 'google', payload.sub, deviceId);
       console.log('[Google Native] Created new user:', userEmail, deviceId ? `with deviceId: ${deviceId}` : 'without deviceId');
+      
+      // Verify device_id was saved to users table
+      if (deviceId) {
+        const verifyUser = await getUserByEmail(userEmail);
+        if (verifyUser && verifyUser.device_id === deviceId) {
+          console.log('[Google Native] ✅ VERIFIED: device_id saved to users table:', verifyUser.device_id);
+        } else {
+          console.warn('[Google Native] ⚠️ WARNING: device_id not found in users table after creation. Expected:', deviceId, 'Got:', verifyUser?.device_id);
+        }
+      }
     } else {
       // Update last login and device_id if provided
       await updateUserLastLogin(user.id);
@@ -710,6 +720,14 @@ router.post('/google-native', async (req, res) => {
           WHERE id = ${user.id}
         `;
         console.log('[Google Native] Updated user device_id:', deviceId);
+        
+        // Verify device_id was updated
+        const verifyUser = await getUserByEmail(userEmail);
+        if (verifyUser && verifyUser.device_id === deviceId) {
+          console.log('[Google Native] ✅ VERIFIED: device_id updated in users table:', verifyUser.device_id);
+        } else {
+          console.warn('[Google Native] ⚠️ WARNING: device_id not found in users table after update. Expected:', deviceId, 'Got:', verifyUser?.device_id);
+        }
       }
       console.log('[Google Native] Existing user logged in:', userEmail);
     }
@@ -818,6 +836,16 @@ router.post('/apple-native', async (req, res) => {
       const passwordHash = await hashPassword(randomPassword);
       user = await createUser(userEmail, passwordHash, userName || null, 'apple', appleUser.sub, deviceId);
       console.log('[Apple Native] Created new user:', userEmail, deviceId ? `with deviceId: ${deviceId}` : 'without deviceId');
+      
+      // Verify device_id was saved to users table
+      if (deviceId) {
+        const verifyUser = await getUserByEmail(userEmail);
+        if (verifyUser && verifyUser.device_id === deviceId) {
+          console.log('[Apple Native] ✅ VERIFIED: device_id saved to users table:', verifyUser.device_id);
+        } else {
+          console.warn('[Apple Native] ⚠️ WARNING: device_id not found in users table after creation. Expected:', deviceId, 'Got:', verifyUser?.device_id);
+        }
+      }
     } else {
       // Update last login and device_id if provided
       await updateUserLastLogin(user.id);
@@ -829,6 +857,14 @@ router.post('/apple-native', async (req, res) => {
           WHERE id = ${user.id}
         `;
         console.log('[Apple Native] Updated user device_id:', deviceId);
+        
+        // Verify device_id was updated
+        const verifyUser = await getUserByEmail(userEmail);
+        if (verifyUser && verifyUser.device_id === deviceId) {
+          console.log('[Apple Native] ✅ VERIFIED: device_id updated in users table:', verifyUser.device_id);
+        } else {
+          console.warn('[Apple Native] ⚠️ WARNING: device_id not found in users table after update. Expected:', deviceId, 'Got:', verifyUser?.device_id);
+        }
       }
       console.log('[Apple Native] Existing user logged in:', userEmail);
     }
