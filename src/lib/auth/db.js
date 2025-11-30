@@ -78,24 +78,52 @@ export async function initAuthDatabase() {
     // Add user_id columns to existing tables if they don't exist
     try {
       await sql`ALTER TABLE devices ADD COLUMN IF NOT EXISTS user_id INTEGER`;
-      await sql`ALTER TABLE devices ADD CONSTRAINT IF NOT EXISTS fk_devices_user_id FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE`;
+      
+      // Check if constraint exists before adding (PostgreSQL doesn't support IF NOT EXISTS for constraints)
+      const constraintExists = await sql`
+        SELECT 1 FROM pg_constraint 
+        WHERE conname = 'fk_devices_user_id' 
+        LIMIT 1
+      `;
+      if (constraintExists.length === 0) {
+        await sql`ALTER TABLE devices ADD CONSTRAINT fk_devices_user_id FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE`;
+        console.log('✅ Added fk_devices_user_id constraint');
+      }
     } catch (e) {
-      // Column might already exist, ignore
-      console.log('Note: devices.user_id column might already exist');
+      // Column or constraint might already exist, ignore
+      console.log('Note: devices.user_id column/constraint might already exist');
     }
 
     try {
       await sql`ALTER TABLE price_alerts ADD COLUMN IF NOT EXISTS user_id INTEGER`;
-      await sql`ALTER TABLE price_alerts ADD CONSTRAINT IF NOT EXISTS fk_price_alerts_user_id FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE`;
+      
+      const constraintExists = await sql`
+        SELECT 1 FROM pg_constraint 
+        WHERE conname = 'fk_price_alerts_user_id' 
+        LIMIT 1
+      `;
+      if (constraintExists.length === 0) {
+        await sql`ALTER TABLE price_alerts ADD CONSTRAINT fk_price_alerts_user_id FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE`;
+        console.log('✅ Added fk_price_alerts_user_id constraint');
+      }
     } catch (e) {
-      console.log('Note: price_alerts.user_id column might already exist');
+      console.log('Note: price_alerts.user_id column/constraint might already exist');
     }
 
     try {
       await sql`ALTER TABLE alarm_subscriptions ADD COLUMN IF NOT EXISTS user_id INTEGER`;
-      await sql`ALTER TABLE alarm_subscriptions ADD CONSTRAINT IF NOT EXISTS fk_alarm_subscriptions_user_id FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE`;
+      
+      const constraintExists = await sql`
+        SELECT 1 FROM pg_constraint 
+        WHERE conname = 'fk_alarm_subscriptions_user_id' 
+        LIMIT 1
+      `;
+      if (constraintExists.length === 0) {
+        await sql`ALTER TABLE alarm_subscriptions ADD CONSTRAINT fk_alarm_subscriptions_user_id FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE`;
+        console.log('✅ Added fk_alarm_subscriptions_user_id constraint');
+      }
     } catch (e) {
-      console.log('Note: alarm_subscriptions.user_id column might already exist');
+      console.log('Note: alarm_subscriptions.user_id column/constraint might already exist');
     }
 
     // Create indexes
