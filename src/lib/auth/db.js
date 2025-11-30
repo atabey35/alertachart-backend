@@ -128,6 +128,10 @@ export async function initAuthDatabase() {
 
     // Migration: Recreate device_id column with UNIQUE constraint
     // This ensures each device_id can only belong to one user
+    console.log('');
+    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    console.log('🔄 [Migration] Starting device_id column migration...');
+    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
     try {
       // Check if device_id column exists
       const columnExists = await sql`
@@ -137,8 +141,10 @@ export async function initAuthDatabase() {
           AND column_name = 'device_id'
       `;
       
+      console.log(`[Migration] device_id column exists: ${columnExists.length > 0}`);
+      
       if (columnExists.length > 0) {
-        console.log('🔄 Dropping existing device_id column...');
+        console.log('🔄 [Migration] Dropping existing device_id column...');
         // Drop the column (this will fail if there are constraints, so we handle it)
         try {
           await sql`ALTER TABLE users DROP COLUMN device_id`;
@@ -163,12 +169,14 @@ export async function initAuthDatabase() {
       }
       
       // Create device_id column with UNIQUE constraint
-      console.log('🔄 Creating device_id column with UNIQUE constraint...');
+      console.log('🔄 [Migration] Creating device_id column with UNIQUE constraint...');
       await sql`ALTER TABLE users ADD COLUMN device_id TEXT UNIQUE`;
-      console.log('✅ device_id column created with UNIQUE constraint');
+      console.log('✅ [Migration] device_id column created with UNIQUE constraint');
+      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
     } catch (migrationError) {
       // Column might already exist with different structure, or error occurred
-      console.error('❌ device_id column migration error:', migrationError.message);
+      console.error('❌ [Migration] device_id column migration error:', migrationError.message);
+      console.error('❌ [Migration] Error details:', migrationError);
       // Try to add unique constraint if column exists but doesn't have it
       try {
         const hasUnique = await sql`
