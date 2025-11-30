@@ -974,6 +974,29 @@ router.post('/apple-native', async (req, res) => {
       await updateUserLastLogin(user.id);
       if (deviceId) {
         const sql = getSql();
+        
+        // 🔥 CRITICAL: Check if deviceId is already used by another user
+        const existingDeviceUser = await sql`
+          SELECT id, email, provider
+          FROM users 
+          WHERE device_id = ${deviceId} AND id != ${user.id}
+          LIMIT 1
+        `;
+        
+        if (existingDeviceUser.length > 0) {
+          const existingUser = existingDeviceUser[0];
+          console.log('[Apple Native] ⚠️ deviceId already used by another user:', existingUser.email);
+          
+          // Remove device_id from old user
+          await sql`
+            UPDATE users 
+            SET device_id = NULL
+            WHERE id = ${existingUser.id}
+          `;
+          console.log('[Apple Native] ✅ Removed device_id from old user');
+        }
+        
+        // Now update device_id for current user
         await sql`
           UPDATE users 
           SET device_id = ${deviceId}
