@@ -1,8 +1,8 @@
 /**
- * Authentication database operations (Neon PostgreSQL)
+ * Authentication database operations (Railway PostgreSQL)
  */
 
-import { neon } from '@neondatabase/serverless';
+import postgres from 'postgres';
 
 let sql = null;
 
@@ -11,7 +11,12 @@ function getSql() {
     if (!process.env.DATABASE_URL) {
       throw new Error('DATABASE_URL environment variable is not set');
     }
-    sql = neon(process.env.DATABASE_URL);
+    // Railway PostgreSQL connection
+    sql = postgres(process.env.DATABASE_URL, {
+      max: 1, // Connection pool size
+      idle_timeout: 20,
+      connect_timeout: 10,
+    });
   }
   return sql;
 }

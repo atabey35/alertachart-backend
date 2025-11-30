@@ -3,7 +3,7 @@
  * Usage: node scripts/test-premium-check.js <email>
  */
 
-import { neon } from '@neondatabase/serverless';
+import postgres from 'postgres';
 import dotenv from 'dotenv';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
@@ -14,7 +14,11 @@ const __dirname = dirname(__filename);
 // Load .env file
 dotenv.config({ path: join(__dirname, '../.env') });
 
-const sql = neon(process.env.DATABASE_URL);
+const sql = postgres(process.env.DATABASE_URL, {
+  max: 1,
+  idle_timeout: 20,
+  connect_timeout: 10,
+});
 
 async function testPremiumCheck(email) {
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');

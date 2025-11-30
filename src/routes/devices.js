@@ -143,11 +143,15 @@ router.post('/link', authenticateToken, async (req, res) => {
       console.log(`✅ Device ${deviceId} created automatically and linked to user ${userId}${pushToken ? ' (with push token)' : ' (push token will be added later)'}`);
     } else {
       // Device exists, just update userId
-      const { neon } = await import('@neondatabase/serverless');
+      const postgres = (await import('postgres')).default;
       if (!process.env.DATABASE_URL) {
         throw new Error('DATABASE_URL environment variable is not set');
       }
-      const sql = neon(process.env.DATABASE_URL);
+      const sql = postgres(process.env.DATABASE_URL, {
+        max: 1,
+        idle_timeout: 20,
+        connect_timeout: 10,
+      });
       
       // Update pushToken if provided (and validate it's not a placeholder)
       if (pushToken && pushToken !== device.expo_push_token) {

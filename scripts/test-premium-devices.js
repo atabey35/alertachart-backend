@@ -3,12 +3,16 @@
  * Run: node scripts/test-premium-devices.js
  */
 
-import { neon } from '@neondatabase/serverless';
+import postgres from 'postgres';
 import dotenv from 'dotenv';
 
 dotenv.config();
 
-const sql = neon(process.env.DATABASE_URL);
+const sql = postgres(process.env.DATABASE_URL, {
+  max: 1,
+  idle_timeout: 20,
+  connect_timeout: 10,
+});
 
 async function testPremiumDevices() {
   console.log('🔍 Testing premium/trial devices query...\n');
