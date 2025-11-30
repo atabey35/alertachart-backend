@@ -143,7 +143,7 @@ export async function initAuthDatabase() {
         try {
           await sql`ALTER TABLE users DROP COLUMN device_id`;
           console.log('✅ device_id column dropped');
-        } catch (dropError: any) {
+        } catch (dropError) {
           // If column has constraints, drop them first
           if (dropError.message?.includes('constraint') || dropError.code === '2BP01') {
             console.log('⚠️ device_id has constraints, dropping them first...');
@@ -166,7 +166,7 @@ export async function initAuthDatabase() {
       console.log('🔄 Creating device_id column with UNIQUE constraint...');
       await sql`ALTER TABLE users ADD COLUMN device_id TEXT UNIQUE`;
       console.log('✅ device_id column created with UNIQUE constraint');
-    } catch (migrationError: any) {
+    } catch (migrationError) {
       // Column might already exist with different structure, or error occurred
       console.error('❌ device_id column migration error:', migrationError.message);
       // Try to add unique constraint if column exists but doesn't have it
@@ -185,7 +185,7 @@ export async function initAuthDatabase() {
         } else {
           console.log('✅ device_id already has UNIQUE constraint');
         }
-      } catch (constraintError: any) {
+      } catch (constraintError) {
         console.warn('⚠️ Could not add UNIQUE constraint:', constraintError.message);
         // Continue anyway - column exists, just without unique constraint
       }
