@@ -17,6 +17,7 @@ import {
   getSessionByRefreshToken,
   deleteSession,
   deleteUserSessions,
+  getSql,
 } from '../lib/auth/db.js';
 
 const router = express.Router();
@@ -686,6 +687,9 @@ router.post('/google-native', async (req, res) => {
       });
     }
 
+    // Get deviceId from request body
+    const deviceId = req.body.deviceId || null;
+
     // Find or create user
     let user = await getUserByEmail(userEmail);
     
@@ -693,11 +697,20 @@ router.post('/google-native', async (req, res) => {
       // Create new user with random password (OAuth users don't need password)
       const randomPassword = crypto.randomBytes(32).toString('hex');
       const passwordHash = await hashPassword(randomPassword);
-      user = await createUser(userEmail, passwordHash, userName || null, 'google', payload.sub);
-      console.log('[Google Native] Created new user:', userEmail);
+      user = await createUser(userEmail, passwordHash, userName || null, 'google', payload.sub, deviceId);
+      console.log('[Google Native] Created new user:', userEmail, deviceId ? `with deviceId: ${deviceId}` : 'without deviceId');
     } else {
-      // Update last login
+      // Update last login and device_id if provided
       await updateUserLastLogin(user.id);
+      if (deviceId) {
+        const sql = getSql();
+        await sql`
+          UPDATE users 
+          SET device_id = ${deviceId}
+          WHERE id = ${user.id}
+        `;
+        console.log('[Google Native] Updated user device_id:', deviceId);
+      }
       console.log('[Google Native] Existing user logged in:', userEmail);
     }
 
@@ -707,7 +720,6 @@ router.post('/google-native', async (req, res) => {
 
     // Create session
     const expiresAt = getTokenExpiration(process.env.JWT_REFRESH_EXPIRES_IN || '7d');
-    const deviceId = req.body.deviceId || null;
     const ipAddress = req.ip || req.connection.remoteAddress;
     const userAgent = req.get('user-agent');
 
@@ -794,6 +806,9 @@ router.post('/apple-native', async (req, res) => {
       });
     }
 
+    // Get deviceId from request body
+    const deviceId = req.body.deviceId || null;
+
     // Find or create user
     let user = await getUserByEmail(userEmail);
     
@@ -801,11 +816,20 @@ router.post('/apple-native', async (req, res) => {
       // Create new user with random password (OAuth users don't need password)
       const randomPassword = crypto.randomBytes(32).toString('hex');
       const passwordHash = await hashPassword(randomPassword);
-      user = await createUser(userEmail, passwordHash, userName || null, 'apple', appleUser.sub);
-      console.log('[Apple Native] Created new user:', userEmail);
+      user = await createUser(userEmail, passwordHash, userName || null, 'apple', appleUser.sub, deviceId);
+      console.log('[Apple Native] Created new user:', userEmail, deviceId ? `with deviceId: ${deviceId}` : 'without deviceId');
     } else {
-      // Update last login
+      // Update last login and device_id if provided
       await updateUserLastLogin(user.id);
+      if (deviceId) {
+        const sql = getSql();
+        await sql`
+          UPDATE users 
+          SET device_id = ${deviceId}
+          WHERE id = ${user.id}
+        `;
+        console.log('[Apple Native] Updated user device_id:', deviceId);
+      }
       console.log('[Apple Native] Existing user logged in:', userEmail);
     }
 
@@ -815,7 +839,6 @@ router.post('/apple-native', async (req, res) => {
 
     // Create session
     const expiresAt = getTokenExpiration(process.env.JWT_REFRESH_EXPIRES_IN || '7d');
-    const deviceId = req.body.deviceId || null;
     const ipAddress = req.ip || req.connection.remoteAddress;
     const userAgent = req.get('user-agent');
 

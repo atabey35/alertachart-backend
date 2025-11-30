@@ -6,7 +6,7 @@ import postgres from 'postgres';
 
 let sql = null;
 
-function getSql() {
+export function getSql() {
   if (!sql) {
     if (!process.env.DATABASE_URL) {
       throw new Error('DATABASE_URL environment variable is not set');
@@ -120,12 +120,12 @@ export async function initAuthDatabase() {
 }
 
 // User operations
-export async function createUser(email, passwordHash, name = null, provider = null, providerUserId = null) {
+export async function createUser(email, passwordHash, name = null, provider = null, providerUserId = null, deviceId = null) {
   const sql = getSql();
   const result = await sql`
-    INSERT INTO users (email, password_hash, name, provider, provider_user_id)
-    VALUES (${email}, ${passwordHash}, ${name}, ${provider}, ${providerUserId})
-    RETURNING id, email, name, provider, provider_user_id, created_at
+    INSERT INTO users (email, password_hash, name, provider, provider_user_id, device_id)
+    VALUES (${email}, ${passwordHash}, ${name}, ${provider}, ${providerUserId}, ${deviceId})
+    RETURNING id, email, name, provider, provider_user_id, device_id, created_at
   `;
   return result[0];
 }
