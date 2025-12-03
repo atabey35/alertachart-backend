@@ -16,15 +16,20 @@ export class AutoPriceAlertService {
     this.wsConnections = new Map();
     this.priceCache = new Map();
     this.prevPriceCache = new Map(); // Önceki fiyatları sakla (zona muerta için)
-    this.lastNotifications = new Map(); // Symbol + level için son bildirim zamanı
+    this.lastNotifications = new Map(); // Symbol + level için son bildirim zamanı (UNIFIED: no direction)
     this.triggeredLevels = new Map(); // Trigger edilmiş seviyeler (tekrar etmemek için)
+    this.lastTriggeredLevel = new Map(); // Hysteresis: Son bildirim gönderilen seviye (symbol -> {level, timestamp, direction})
     this.customAlertsCache = new Map(); // Custom alert'ler için cache (symbol -> alerts[])
     this.triggeredCustomAlerts = new Map(); // Trigger edilmiş custom alert'ler (alert_id -> timestamp)
     this.isRunning = false;
     this.customAlertsCheckInterval = null; // Custom alert'leri kontrol etmek için interval
     
-    // COOLDOWN: Aynı seviye için 5 dakika bekle (15 dakikaydı, çok uzundu)
+    // COOLDOWN: Aynı seviye için 5 dakika bekle (UNIFIED: applies to both UP and DOWN for same level)
     this.NOTIFICATION_COOLDOWN = 5 * 60 * 1000; // 5 dakika
+    
+    // HYSTERESIS: "Close Range" - Price must move this far from last triggered level before new alert
+    // Prevents flickering when price wobbles around a recently notified level
+    this.HYSTERESIS_CLOSE_RANGE_PERCENT = 0.5; // %0.5 of the level (e.g., 93,000 * 0.005 = 465$ range)
     
     // ZONA MUERTA: Her coin için tolerans yüzdeleri
     this.TOLERANCE_PERCENTAGES = {
@@ -212,6 +217,7 @@ export class AutoPriceAlertService {
 
   /**
    * Fiyat seviyesini kontrol et ve gerekirse bildirim gönder
+   * REFACTORED: Unified cooldown keys and hysteresis to prevent flickering
    */
   async checkPriceLevel(symbol, currentPrice) {
     const config = this.watchList[symbol];
@@ -230,120 +236,139 @@ export class AutoPriceAlertService {
     // Bir önceki yuvarlak sayıyı bul (aşağı)
     const nextLevelDown = Math.floor(currentPrice / roundTo) * roundTo;
 
-    // Zona muerta hesapla (proximity delta'ya göre)
-    const deadZoneUp = this.calculateDeadZone(nextLevelUp, proximityDeltaUp, symbol);
-    const deadZoneDown = this.calculateDeadZone(nextLevelDown, proximityDeltaDown, symbol);
+    // 🔥 UNIFIED COOLDOWN CHECK: Check cooldown by level only (not direction)
+    // If we notified about 93,000 (UP), we must NOT notify about 93,000 (DOWN) for cooldown duration
+    const levelUpKey = `${symbol}_${nextLevelUp}`;
+    const levelDownKey = `${symbol}_${nextLevelDown}`;
 
-    // YUKARIYA YAKLAŞMA KONTROLÜ
-    const distanceToLevelUp = nextLevelUp - currentPrice;
-    if (distanceToLevelUp > 0 && distanceToLevelUp <= proximityDeltaUp) {
-      const key = `${symbol}_${nextLevelUp}_up`;
+    // HYSTERESIS CHECK: If price is still within "Close Range" of last triggered level, suppress ALL alerts
+    const lastTriggered = this.lastTriggeredLevel.get(symbol);
+    if (lastTriggered) {
+      const { level: lastLevel, timestamp } = lastTriggered;
+      const timeSince = Date.now() - timestamp;
+      const closeRange = lastLevel * (this.HYSTERESIS_CLOSE_RANGE_PERCENT / 100);
+      const distanceFromLastLevel = Math.abs(currentPrice - lastLevel);
       
-      // Cooldown ve trigger kontrolü
-      if (this.shouldNotify(key) && !this.isTriggered(key)) {
-        // ZONA MUERTA KONTROLÜ: Fiyat yukarıya doğru hareket ediyor mu?
-        const isMovingUp = currentPrice > prevPrice;
-        
-        // ÖNEMLİ: Eğer önceki fiyat seviyenin ÜSTÜNDEYSE, şimdi ALTINA inmiş demektir
-        // Bu durumda "yaklaşıyor" bildirimi GÖNDERMEMELİYİZ (yeni aşağı indi, spam olur)
-        const justCrossedBelow = prevPrice > nextLevelUp && currentPrice < nextLevelUp;
-        
-        // Fiyat yuvarlak sayıya çok yakınsa (zona muerta içinde) VE hareket aşağı yönlüyse bildirim GÖNDERME
-        const tooCloseToTarget = currentPrice >= deadZoneUp.lower && currentPrice <= deadZoneUp.upper;
-        
-        // Bildirim gönder: Cooldown OK + Triggered değil + Zona muerta dışında VEYA yukarı hareket + Yeni aşağı geçiş DEĞİL
-        if ((!tooCloseToTarget || isMovingUp) && !justCrossedBelow) {
-          // 🔥 CRITICAL FIX: Trigger'ı ÖNCE işaretle (bildirim gönderilirken yeni kontrolleri engelle)
-          this.markTriggered(key);
-          this.markNotified(key);
-          
-          console.log(`📈 ${name} ${nextLevelUp.toLocaleString()}$ seviyesine yaklaşıyor (şu an: ${currentPrice.toFixed(2)}$, mesafe: ${distanceToLevelUp.toFixed(2)}$)`);
-          console.log(`   💡 Zona muerta: ${deadZoneUp.lower.toFixed(2)} - ${deadZoneUp.upper.toFixed(2)}, Hareket: ${isMovingUp ? '⬆️' : '⬇️'}`);
-          
-          try {
-            await this.sendNotificationToAll(
-              symbol,
-              name,
-              emoji,
-              currentPrice,
-              nextLevelUp,
-              'up'
-            );
-          } catch (error) {
-            console.error(`❌ Error sending notification for ${symbol} ${nextLevelUp}$:`, error);
-            // Hata durumunda trigger'ı geri al (bir sonraki denemede tekrar gönderilebilir)
-            this.clearTriggered(key);
-          }
-        } else if (justCrossedBelow) {
-          console.log(`⏸️  ${name} seviyeyi yeni aşağı geçti (${currentPrice.toFixed(2)}$), "yaklaşıyor" bildirimi gönderilmedi`);
-        } else {
-          console.log(`⏸️  ${name} zona muerta içinde (${currentPrice.toFixed(2)}$), bildirim bekleniyor...`);
-        }
+      // If still within cooldown AND within close range, suppress all alerts for this symbol
+      if (timeSince < this.NOTIFICATION_COOLDOWN && distanceFromLastLevel <= closeRange) {
+        // Price is still wobbling around the last notified level - suppress
+        return;
       }
-    } else if (currentPrice >= nextLevelUp) {
-      // Seviye geçildi, trigger'ı sıfırla
-      const key = `${symbol}_${nextLevelUp}_up`;
-      this.clearTriggered(key);
     }
 
-    // AŞAĞIYA YAKLAŞMA KONTROLÜ
-    const distanceToLevelDown = currentPrice - nextLevelDown;
-    if (distanceToLevelDown > 0 && distanceToLevelDown <= proximityDeltaDown) {
-      const key = `${symbol}_${nextLevelDown}_down`;
+    // Clear triggers if price moved significantly away from levels
+    // This allows new alerts when price returns to the level after moving away
+    if (currentPrice >= nextLevelUp) {
+      // Price moved above UP level - clear trigger (allows new alert if price comes back down)
+      this.clearTriggered(levelUpKey);
+    }
+    
+    if (currentPrice <= nextLevelDown) {
+      // Price moved below DOWN level - clear trigger (allows new alert if price comes back up)
+      this.clearTriggered(levelDownKey);
+    }
+
+    // Check unified cooldown for UP level
+    if (this.shouldNotify(levelUpKey)) {
+      await this.checkLevelApproach(symbol, currentPrice, prevPrice, nextLevelUp, proximityDeltaUp, 'up', name, emoji, config);
+    }
+
+    // Check unified cooldown for DOWN level
+    if (this.shouldNotify(levelDownKey)) {
+      await this.checkLevelApproach(symbol, currentPrice, prevPrice, nextLevelDown, proximityDeltaDown, 'down', name, emoji, config);
+    }
+  }
+
+  /**
+   * Check if price is approaching a specific level and send notification if conditions are met
+   * REFACTORED: Unified logic for both UP and DOWN directions
+   */
+  async checkLevelApproach(symbol, currentPrice, prevPrice, targetLevel, proximityDelta, direction, name, emoji, config) {
+    const distance = direction === 'up' 
+      ? targetLevel - currentPrice  // Distance to level above
+      : currentPrice - targetLevel;  // Distance to level below
+
+    // Must be within proximity delta
+    if (distance <= 0 || distance > proximityDelta) {
+      return;
+    }
+
+    // 🔥 UNIFIED LEVEL KEY: No direction in key - prevents UP/DOWN flickering
+    const levelKey = `${symbol}_${targetLevel}`;
+    
+    // Check if already triggered (in-memory check)
+    if (this.isTriggered(levelKey)) {
+      return;
+    }
+
+    // Zona muerta hesapla
+    const deadZone = this.calculateDeadZone(targetLevel, proximityDelta, symbol);
+
+    // Movement detection: Is price effectively moving TOWARDS the target from outside triggered zone?
+    const isMovingTowards = direction === 'up' 
+      ? currentPrice > prevPrice && prevPrice < targetLevel
+      : currentPrice < prevPrice && prevPrice > targetLevel;
+
+    // Check if price just crossed the level (prevent spam)
+    const justCrossed = direction === 'up'
+      ? prevPrice > targetLevel && currentPrice < targetLevel  // Was above, now below
+      : prevPrice < targetLevel && currentPrice > targetLevel; // Was below, now above
+
+    if (justCrossed) {
+      // Price just crossed the level - don't send notification (spam prevention)
+      return;
+    }
+
+    // Fiyat yuvarlak sayıya çok yakınsa (zona muerta içinde) VE hareket hedefe doğru değilse bildirim GÖNDERME
+    const tooCloseToTarget = currentPrice >= deadZone.lower && currentPrice <= deadZone.upper;
+    
+    // Bildirim gönder: Zona muerta dışında VEYA hedefe doğru hareket
+    if (!tooCloseToTarget || isMovingTowards) {
+      // 🔥 CRITICAL: Mark as triggered BEFORE sending (prevents race condition)
+      this.markTriggered(levelKey);
+      this.markNotified(levelKey); // Unified cooldown
       
-      // Cooldown ve trigger kontrolü
-      if (this.shouldNotify(key) && !this.isTriggered(key)) {
-        // ZONA MUERTA KONTROLÜ: Fiyat aşağıya doğru hareket ediyor mu?
-        const isMovingDown = currentPrice < prevPrice;
-        
-        // ÖNEMLİ: Eğer önceki fiyat seviyenin ALTINDAYSA, şimdi ÜSTÜNE çıkmış demektir
-        // Bu durumda "iniyor" bildirimi GÖNDERMEMELİYİZ (yeni yukarı çıktı, spam olur)
-        const justCrossedAbove = prevPrice < nextLevelDown && currentPrice > nextLevelDown;
-        
-        // Fiyat yuvarlak sayıya çok yakınsa (zona muerta içinde) VE hareket yukarı yönlüyse bildirim GÖNDERME
-        const tooCloseToTarget = currentPrice >= deadZoneDown.lower && currentPrice <= deadZoneDown.upper;
-        
-        // Bildirim gönder: Cooldown OK + Triggered değil + Zona muerta dışında VEYA aşağı hareket + Yeni yukarı geçiş DEĞİL
-        if ((!tooCloseToTarget || isMovingDown) && !justCrossedAbove) {
-          // 🔥 CRITICAL FIX: Trigger'ı ÖNCE işaretle (bildirim gönderilirken yeni kontrolleri engelle)
-          this.markTriggered(key);
-          this.markNotified(key);
-          
-          console.log(`📉 ${name} ${nextLevelDown.toLocaleString()}$ seviyesine iniyor (şu an: ${currentPrice.toFixed(2)}$, mesafe: ${distanceToLevelDown.toFixed(2)}$)`);
-          console.log(`   💡 Zona muerta: ${deadZoneDown.lower.toFixed(2)} - ${deadZoneDown.upper.toFixed(2)}, Hareket: ${isMovingDown ? '⬇️' : '⬆️'}`);
-          
-          try {
-            await this.sendNotificationToAll(
-              symbol,
-              name,
-              emoji,
-              currentPrice,
-              nextLevelDown,
-              'down'
-            );
-          } catch (error) {
-            console.error(`❌ Error sending notification for ${symbol} ${nextLevelDown}$:`, error);
-            // Hata durumunda trigger'ı geri al (bir sonraki denemede tekrar gönderilebilir)
-            this.clearTriggered(key);
-          }
-        } else if (justCrossedAbove) {
-          console.log(`⏸️  ${name} seviyeyi yeni yukarı geçti (${currentPrice.toFixed(2)}$), "iniyor" bildirimi gönderilmedi`);
-        } else {
-          console.log(`⏸️  ${name} zona muerta içinde (${currentPrice.toFixed(2)}$), bildirim bekleniyor...`);
-        }
+      // 🔥 HYSTERESIS: Record last triggered level
+      this.lastTriggeredLevel.set(symbol, {
+        level: targetLevel,
+        timestamp: Date.now(),
+        direction: direction
+      });
+
+      const directionEmoji = direction === 'up' ? '📈' : '📉';
+      const directionText = direction === 'up' ? 'yaklaşıyor' : 'iniyor';
+      
+      console.log(`${directionEmoji} ${name} ${targetLevel.toLocaleString()}$ seviyesine ${directionText} (şu an: ${currentPrice.toFixed(2)}$, mesafe: ${distance.toFixed(2)}$)`);
+      console.log(`   💡 Zona muerta: ${deadZone.lower.toFixed(2)} - ${deadZone.upper.toFixed(2)}, Hareket: ${isMovingTowards ? '✅ Hedefe doğru' : '❌ Hedefe doğru değil'}`);
+      console.log(`   🔒 Unified cooldown key: ${levelKey} (applies to both UP and DOWN)`);
+      
+      try {
+        await this.sendNotificationToAll(
+          symbol,
+          name,
+          emoji,
+          currentPrice,
+          targetLevel,
+          direction
+        );
+      } catch (error) {
+        console.error(`❌ Error sending notification for ${symbol} ${targetLevel}$:`, error);
+        // Hata durumunda trigger'ı geri al (bir sonraki denemede tekrar gönderilebilir)
+        this.clearTriggered(levelKey);
+        this.lastTriggeredLevel.delete(symbol);
       }
-    } else if (currentPrice <= nextLevelDown) {
-      // Seviye geçildi, trigger'ı sıfırla
-      const key = `${symbol}_${nextLevelDown}_down`;
-      this.clearTriggered(key);
+    } else {
+      console.log(`⏸️  ${name} zona muerta içinde (${currentPrice.toFixed(2)}$), bildirim bekleniyor...`);
     }
   }
 
   /**
    * Bildirim gönderilmeli mi? (Debouncing)
+   * REFACTORED: Uses unified level keys (no direction suffix)
+   * If we notified about 93,000 (UP), we must NOT notify about 93,000 (DOWN) for cooldown duration
    */
-  shouldNotify(key) {
-    const lastNotification = this.lastNotifications.get(key);
+  shouldNotify(levelKey) {
+    const lastNotification = this.lastNotifications.get(levelKey);
     
     if (!lastNotification) return true;
     
@@ -353,30 +378,34 @@ export class AutoPriceAlertService {
 
   /**
    * Bildirim gönderildi olarak işaretle
+   * REFACTORED: Unified level key (no direction) - prevents UP/DOWN flickering
    */
-  markNotified(key) {
-    this.lastNotifications.set(key, Date.now());
+  markNotified(levelKey) {
+    this.lastNotifications.set(levelKey, Date.now());
   }
 
   /**
    * Seviye tetiklenmiş mi kontrol et
+   * REFACTORED: Uses unified level keys (no direction suffix)
    */
-  isTriggered(key) {
-    return this.triggeredLevels.has(key);
+  isTriggered(levelKey) {
+    return this.triggeredLevels.has(levelKey);
   }
 
   /**
    * Seviyeyi tetiklenmiş olarak işaretle
+   * REFACTORED: Unified level key (no direction) - prevents UP/DOWN flickering
    */
-  markTriggered(key) {
-    this.triggeredLevels.set(key, true);
+  markTriggered(levelKey) {
+    this.triggeredLevels.set(levelKey, true);
   }
 
   /**
    * Seviye tetiklenmesini temizle
+   * REFACTORED: Unified level key (no direction)
    */
-  clearTriggered(key) {
-    this.triggeredLevels.delete(key);
+  clearTriggered(levelKey) {
+    this.triggeredLevels.delete(levelKey);
   }
 
   /**
