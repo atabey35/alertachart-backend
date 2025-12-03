@@ -607,6 +607,22 @@ export class AutoPriceAlertService {
       }
       
       if (shouldNotify) {
+        // 🔥 CRITICAL: Validate token BEFORE sending notification (prevents "No valid FCM tokens" spam)
+        if (!expo_push_token) {
+          console.log(`⏸️  Custom alert ${id} skipped: No push token for user ${alert.user_id}`);
+          continue;
+        }
+        
+        // Validate token format (same logic as unified-push.js)
+        const lowerToken = expo_push_token.toLowerCase();
+        if (lowerToken.includes('placeholder') || 
+            lowerToken.includes('test') || 
+            lowerToken === 'unknown' ||
+            expo_push_token.length < 50) { // FCM tokens are typically longer
+          console.log(`⏸️  Custom alert ${id} skipped: Invalid token format for user ${alert.user_id}`);
+          continue;
+        }
+        
         // 🔥 CRITICAL: Mark as triggered BEFORE sending notification (prevent race condition)
         this.triggeredCustomAlerts.set(triggerKey, Date.now());
         
