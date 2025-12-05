@@ -92,6 +92,8 @@ router.post('/price', optionalAuth, async (req, res) => {
     
     if (!userId && refreshToken) {
       console.log('[Alerts POST] 🔄 Attempting token refresh...');
+      console.log('[Alerts POST] Refresh token (first 50 chars):', refreshToken.substring(0, 50));
+      
       // Try to refresh access token from refresh token
       try {
         console.log('[Alerts POST] Verifying refresh token...');
@@ -100,34 +102,51 @@ router.post('/price', optionalAuth, async (req, res) => {
         
         console.log('[Alerts POST] Getting session from database...');
         const session = await getSessionByRefreshToken(refreshToken);
-        console.log('[Alerts POST] Session result:', session ? { userId: session.user_id, email: session.email } : 'null');
+        console.log('[Alerts POST] Session result:', session ? { 
+          userId: session.user_id, 
+          email: session.email,
+          expiresAt: session.expires_at,
+          isExpired: session.expires_at ? new Date(session.expires_at) < new Date() : 'unknown'
+        } : 'null');
         
         if (session) {
-          // Generate new access token
-          const accessToken = generateAccessToken(session.user_id, session.email);
-          console.log('[Alerts POST] Generated new access token');
-          
-          // Set accessToken cookie
-          res.cookie('accessToken', accessToken, {
-            httpOnly: true,
-            secure: process.env.NODE_ENV === 'production',
-            sameSite: 'lax',
-            path: '/',
-            maxAge: 15 * 60 * 1000, // 15 minutes
-          });
-          
-          userId = session.user_id;
-          req.user = { userId: session.user_id, email: session.email }; // Update req.user for consistency
-          console.log('[Alerts POST] ✅ Token refreshed successfully, userId:', userId);
+          // Check if session is expired
+          if (session.expires_at && new Date(session.expires_at) < new Date()) {
+            console.log('[Alerts POST] ⚠️ Session expired:', session.expires_at);
+            // Don't set userId, will return 401 below
+          } else {
+            // Generate new access token
+            const accessToken = generateAccessToken(session.user_id, session.email);
+            console.log('[Alerts POST] Generated new access token');
+            
+            // Set accessToken cookie
+            res.cookie('accessToken', accessToken, {
+              httpOnly: true,
+              secure: process.env.NODE_ENV === 'production',
+              sameSite: 'lax',
+              path: '/',
+              maxAge: 15 * 60 * 1000, // 15 minutes
+            });
+            
+            userId = session.user_id;
+            req.user = { userId: session.user_id, email: session.email }; // Update req.user for consistency
+            console.log('[Alerts POST] ✅ Token refreshed successfully, userId:', userId);
+          }
         } else {
-          console.log('[Alerts POST] ⚠️ Session not found in database');
+          console.log('[Alerts POST] ⚠️ Session not found in database for refresh token');
+          console.log('[Alerts POST] This might mean:');
+          console.log('[Alerts POST]   1. Refresh token is invalid or expired');
+          console.log('[Alerts POST]   2. Session was deleted from database');
+          console.log('[Alerts POST]   3. User needs to login again');
         }
       } catch (refreshError) {
         console.log('[Alerts POST] ❌ Token refresh failed:', refreshError.message);
+        console.log('[Alerts POST] Refresh error name:', refreshError.name);
         console.log('[Alerts POST] Refresh error stack:', refreshError.stack);
       }
     } else if (!userId) {
       console.log('[Alerts POST] ⚠️ No userId and no refreshToken available');
+      console.log('[Alerts POST] User needs to login to create custom alerts');
     }
     
     if (!userId) {
