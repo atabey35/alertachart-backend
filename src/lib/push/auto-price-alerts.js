@@ -466,9 +466,9 @@ export class AutoPriceAlertService {
         const lang = device.language ? device.language.toLowerCase() : 'tr';
         const isTurkish = lang.startsWith('tr');
         
-        // 🔥 DEBUG: Log device language for troubleshooting
-        if (process.env.NODE_ENV === 'development' || !isTurkish) {
-          console.log(`   📱 Device ${device.device_id?.substring(0, 20)}... - Language: ${device.language || 'NULL (default: tr)'}, IsTurkish: ${isTurkish}, Email: ${device.email || 'N/A'}`);
+        // 🔥 DEBUG: Log ALL non-Turkish devices for troubleshooting (production'da da çalışmalı)
+        if (!isTurkish) {
+          console.log(`   📱 Device ${device.device_id?.substring(0, 20)}... - Language: ${device.language || 'NULL (default: tr)'}, IsTurkish: ${isTurkish}, Email: ${device.email || 'N/A'}, Platform: ${device.platform || 'N/A'}`);
         }
 
         if (isTurkish) {
