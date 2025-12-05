@@ -322,6 +322,7 @@ router.post('/notify', optionalAuth, async (req, res) => {
     }
 
     console.log(`📱 Sending alarm notification: ${trTokens.length} TR device(s), ${enTokens.length} EN device(s)`);
+    console.log(`📋 Original message from frontend: "${message}"`);
 
     // 🔥 MULTILINGUAL: Mesajları çevir
     const upperSymbol = symbol.toUpperCase();
