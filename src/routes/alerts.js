@@ -76,32 +76,51 @@ router.post('/price', optionalAuth, async (req, res) => {
     let userId = req.user?.userId;
     
     // 🔥 CRITICAL: For guest users, if no userId from cookie/token, try to find user by device_id and userEmail
-    if (!userId && userEmail && deviceId) {
-      console.log('[Alerts POST] 🔓 Guest user detected, trying to find user by device_id and email:', {
+    if (!userId && userEmail) {
+      console.log('[Alerts POST] 🔓 Guest user detected, trying to find user:', {
         userEmail,
-        deviceId: deviceId.substring(0, 20) + '...',
+        deviceId: deviceId ? deviceId.substring(0, 20) + '...' : 'not provided',
       });
       
       try {
         const sql = getAuthSql();
-        const guestUsers = await sql`
-          SELECT id, email, plan, expiry_date, trial_started_at, trial_ended_at
-          FROM users 
-          WHERE email = ${userEmail} 
-          AND device_id = ${deviceId}
-          AND provider = 'guest'
-          LIMIT 1
-        `;
+        
+        // First try: device_id + email (most specific)
+        let guestUsers = [];
+        if (deviceId) {
+          guestUsers = await sql`
+            SELECT id, email, plan, expiry_date, trial_started_at, trial_ended_at, device_id
+            FROM users 
+            WHERE email = ${userEmail} 
+            AND device_id = ${deviceId}
+            AND provider = 'guest'
+            LIMIT 1
+          `;
+        }
+        
+        // Fallback: Only email (guest users have unique emails)
+        if (guestUsers.length === 0) {
+          console.log('[Alerts POST] ⚠️ Guest user not found by device_id and email, trying email only...');
+          guestUsers = await sql`
+            SELECT id, email, plan, expiry_date, trial_started_at, trial_ended_at, device_id
+            FROM users 
+            WHERE email = ${userEmail}
+            AND provider = 'guest'
+            LIMIT 1
+          `;
+        }
         
         if (guestUsers.length > 0) {
           userId = guestUsers[0].id;
-          console.log('[Alerts POST] ✅ Guest user found by device_id and email:', {
+          console.log('[Alerts POST] ✅ Guest user found:', {
             userId,
             email: guestUsers[0].email,
             plan: guestUsers[0].plan,
+            device_id_in_db: guestUsers[0].device_id ? guestUsers[0].device_id.substring(0, 20) + '...' : 'null',
+            device_id_request: deviceId ? deviceId.substring(0, 20) + '...' : 'not provided',
           });
         } else {
-          console.log('[Alerts POST] ⚠️ Guest user not found by device_id and email');
+          console.log('[Alerts POST] ⚠️ Guest user not found by email:', userEmail);
         }
       } catch (guestError) {
         console.error('[Alerts POST] ❌ Error finding guest user:', guestError);
@@ -237,30 +256,50 @@ router.get('/price', optionalAuth, async (req, res) => {
     let userId = req.user?.userId;
     
     // 🔥 CRITICAL: For guest users, if no userId from cookie/token, try to find user by device_id
+    // Also check query param for userEmail as fallback
     if (!userId && deviceId) {
-      console.log('[Alerts GET] 🔓 Guest user detected, trying to find user by device_id:', {
+      const { userEmail } = req.query;
+      console.log('[Alerts GET] 🔓 Guest user detected, trying to find user:', {
         deviceId: deviceId.substring(0, 20) + '...',
+        userEmail: userEmail || 'not provided',
       });
       
       try {
         const sql = getAuthSql();
-        const guestUsers = await sql`
-          SELECT id, email, plan, expiry_date, trial_started_at, trial_ended_at
+        let guestUsers = [];
+        
+        // First try: device_id only
+        guestUsers = await sql`
+          SELECT id, email, plan, expiry_date, trial_started_at, trial_ended_at, device_id
           FROM users 
           WHERE device_id = ${deviceId}
           AND provider = 'guest'
           LIMIT 1
         `;
         
+        // Fallback: email if provided
+        if (guestUsers.length === 0 && userEmail) {
+          console.log('[Alerts GET] ⚠️ Guest user not found by device_id, trying email...');
+          guestUsers = await sql`
+            SELECT id, email, plan, expiry_date, trial_started_at, trial_ended_at, device_id
+            FROM users 
+            WHERE email = ${userEmail}
+            AND provider = 'guest'
+            LIMIT 1
+          `;
+        }
+        
         if (guestUsers.length > 0) {
           userId = guestUsers[0].id;
-          console.log('[Alerts GET] ✅ Guest user found by device_id:', {
+          console.log('[Alerts GET] ✅ Guest user found:', {
             userId,
             email: guestUsers[0].email,
             plan: guestUsers[0].plan,
+            device_id_in_db: guestUsers[0].device_id ? guestUsers[0].device_id.substring(0, 20) + '...' : 'null',
+            device_id_request: deviceId.substring(0, 20) + '...',
           });
         } else {
-          console.log('[Alerts GET] ⚠️ Guest user not found by device_id');
+          console.log('[Alerts GET] ⚠️ Guest user not found');
         }
       } catch (guestError) {
         console.error('[Alerts GET] ❌ Error finding guest user:', guestError);
