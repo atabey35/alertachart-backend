@@ -75,17 +75,25 @@ router.post('/price', optionalAuth, async (req, res) => {
     // Premium check - if no user, try to refresh token
     let userId = req.user?.userId;
     
+    // 🔥 CRITICAL: Also check cookie header (for subdomain/cross-origin requests)
+    const cookieHeader = req.headers.cookie || '';
+    const hasRefreshTokenInHeader = cookieHeader.includes('refreshToken=');
+    const hasRefreshTokenInCookies = !!req.cookies?.refreshToken;
+    const refreshToken = req.cookies?.refreshToken || (cookieHeader.match(/refreshToken=([^;]+)/)?.[1]);
+    
     console.log('[Alerts POST] Checking token refresh:', {
       hasUserId: !!userId,
-      hasRefreshToken: !!req.cookies?.refreshToken,
-      refreshTokenValue: req.cookies?.refreshToken ? `${req.cookies.refreshToken.substring(0, 20)}...` : 'none',
+      hasRefreshTokenInCookies,
+      hasRefreshTokenInHeader,
+      hasRefreshToken: !!refreshToken,
+      refreshTokenValue: refreshToken ? `${refreshToken.substring(0, 20)}...` : 'none',
+      cookieHeaderLength: cookieHeader.length,
     });
     
-    if (!userId && req.cookies?.refreshToken) {
+    if (!userId && refreshToken) {
       console.log('[Alerts POST] 🔄 Attempting token refresh...');
       // Try to refresh access token from refresh token
       try {
-        const refreshToken = req.cookies.refreshToken;
         console.log('[Alerts POST] Verifying refresh token...');
         const decoded = verifyRefreshToken(refreshToken);
         console.log('[Alerts POST] Refresh token verified, decoded:', { userId: decoded.userId, email: decoded.email });
@@ -109,6 +117,7 @@ router.post('/price', optionalAuth, async (req, res) => {
           });
           
           userId = session.user_id;
+          req.user = { userId: session.user_id, email: session.email }; // Update req.user for consistency
           console.log('[Alerts POST] ✅ Token refreshed successfully, userId:', userId);
         } else {
           console.log('[Alerts POST] ⚠️ Session not found in database');
@@ -125,6 +134,7 @@ router.post('/price', optionalAuth, async (req, res) => {
       console.log('[Alerts POST] ❌ No userId found in req.user');
       console.log('[Alerts POST] req.user:', req.user);
       console.log('[Alerts POST] req.cookies:', req.cookies);
+      console.log('[Alerts POST] cookieHeader:', cookieHeader ? `${cookieHeader.substring(0, 100)}...` : 'none');
       return res.status(401).json({
         error: 'Authentication required'
       });
