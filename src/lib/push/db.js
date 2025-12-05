@@ -227,8 +227,7 @@ export async function upsertDevice(deviceId, expoPushToken, platform, appVersion
     RETURNING *
   `;
   
-  // Debug log
-  const deviceLanguage = language || 'tr';
+  // Debug log (deviceLanguage already defined above at line 174)
   if (userId) {
     console.log(`[upsertDevice] ✅ Device ${deviceId} linked to user ${userId}, language: ${deviceLanguage}`);
   } else {
