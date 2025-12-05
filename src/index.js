@@ -96,11 +96,22 @@ app.listen(PORT, async () => {
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
   
   try {
+    console.log('🔍 Starting database initialization...');
+    console.log('🔍 DATABASE_URL exists:', !!process.env.DATABASE_URL);
+    console.log('🔍 DATABASE_URL length:', process.env.DATABASE_URL ? process.env.DATABASE_URL.length : 0);
+    
     await initPushDatabase();
+    console.log('✅ Push database initialized');
+    
     await initAuthDatabase();
-    console.log('✅ Databases initialized');
+    console.log('✅ Auth database initialized');
+    
+    console.log('✅ All databases initialized successfully');
   } catch (error) {
     console.error('❌ Failed to initialize databases:', error);
+    console.error('❌ Error name:', error.name);
+    console.error('❌ Error message:', error.message);
+    console.error('❌ Error stack:', error.stack);
     process.exit(1);
   }
   

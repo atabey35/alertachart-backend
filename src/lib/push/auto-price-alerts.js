@@ -489,6 +489,15 @@ export class AutoPriceAlertService {
       console.log(`   🌍 Global (non-Turkish) devices: ${enCount}`);
       console.log(`   👥 Unique premium/trial users: ${userEmails.size}`);
       console.log(`   🚫 Invalid tokens skipped: ${invalidTokensSkipped}`);
+      
+      // 🔥 DEBUG: Log sample of EN devices for troubleshooting
+      if (enCount === 0 && devices.length > 0) {
+        console.log(`   ⚠️ WARNING: No EN devices found but ${devices.length} total devices exist`);
+        console.log(`   📋 Sample device languages (first 10):`);
+        devices.slice(0, 10).forEach((device, idx) => {
+          console.log(`      ${idx + 1}. Device ${device.device_id?.substring(0, 20)}... - Language: ${device.language || 'NULL'}, Email: ${device.email || 'N/A'}`);
+        });
+      }
 
       if (trTokens.length === 0 && enTokens.length === 0) {
         console.log('📱 No valid premium/trial device tokens found - notification not sent');
