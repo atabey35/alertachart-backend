@@ -465,6 +465,11 @@ export class AutoPriceAlertService {
         // Varsayılan olarak 'tr' kabul ediyoruz (backward compatibility)
         const lang = device.language ? device.language.toLowerCase() : 'tr';
         const isTurkish = lang.startsWith('tr');
+        
+        // 🔥 DEBUG: Log device language for troubleshooting
+        if (process.env.NODE_ENV === 'development' || !isTurkish) {
+          console.log(`   📱 Device ${device.device_id?.substring(0, 20)}... - Language: ${device.language || 'NULL (default: tr)'}, IsTurkish: ${isTurkish}, Email: ${device.email || 'N/A'}`);
+        }
 
         if (isTurkish) {
           trTokens.push(token);
