@@ -49,6 +49,7 @@ export async function initPushDatabase() {
       await sql`ALTER TABLE devices ADD COLUMN IF NOT EXISTS user_id INTEGER`;
       await sql`ALTER TABLE devices ADD COLUMN IF NOT EXISTS model VARCHAR(100)`;
       await sql`ALTER TABLE devices ADD COLUMN IF NOT EXISTS os_version VARCHAR(50)`;
+      await sql`ALTER TABLE devices ADD COLUMN IF NOT EXISTS language VARCHAR(10) DEFAULT 'tr'`;
       console.log('✅ Devices table migration completed');
     } catch (migrationError) {
       console.log('ℹ️  Devices table already has new columns');
@@ -159,7 +160,7 @@ export async function initPushDatabase() {
 }
 
 // Device operations
-export async function upsertDevice(deviceId, expoPushToken, platform, appVersion, userId = null, model = null, osVersion = null) {
+export async function upsertDevice(deviceId, expoPushToken, platform, appVersion, userId = null, model = null, osVersion = null, language = null) {
   const sql = getSql();
   
   // 🔥 CRITICAL FIX: If userId is provided, always update user_id (even if device already exists)
@@ -169,8 +170,10 @@ export async function upsertDevice(deviceId, expoPushToken, platform, appVersion
   // 🔥 FIX: Handle null values for model, osVersion, and appVersion to avoid PostgreSQL type inference errors
   // Use explicit ::text casts for all string parameters
   // 🔥 FIX: expo_push_token can be null (device can be created without push token initially)
+  // 🔥 MULTILINGUAL: Add language support (default to 'tr' if not provided)
+  const deviceLanguage = language || 'tr';
   const result = await sql`
-    INSERT INTO devices (device_id, expo_push_token, platform, app_version, user_id, model, os_version, updated_at)
+    INSERT INTO devices (device_id, expo_push_token, platform, app_version, user_id, model, os_version, language, updated_at)
     VALUES (
       ${deviceId}, 
       ${expoPushToken || null}, 
@@ -179,6 +182,7 @@ export async function upsertDevice(deviceId, expoPushToken, platform, appVersion
       ${userId}, 
       ${model || null}::text, 
       ${osVersion || null}::text, 
+      ${deviceLanguage}::text,
       CURRENT_TIMESTAMP
     )
     ON CONFLICT (device_id)
@@ -210,6 +214,11 @@ export async function upsertDevice(deviceId, expoPushToken, platform, appVersion
       os_version = CASE 
         WHEN ${osVersion}::text IS NOT NULL THEN ${osVersion}::text
         ELSE devices.os_version
+      END,
+      -- 🔥 MULTILINGUAL: Update language if provided
+      language = CASE 
+        WHEN ${deviceLanguage}::text IS NOT NULL THEN ${deviceLanguage}::text
+        ELSE devices.language
       END,
       is_active = true,
       updated_at = CURRENT_TIMESTAMP
@@ -288,6 +297,7 @@ export async function getPremiumTrialDevices() {
       d.user_id,
       d.model,
       d.os_version,
+      d.language,
       u.plan,
       u.expiry_date,
       u.trial_started_at,

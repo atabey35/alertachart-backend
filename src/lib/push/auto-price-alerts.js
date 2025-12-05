@@ -240,7 +240,7 @@ export class AutoPriceAlertService {
     // If we notified about 93,000 (UP), we must NOT notify about 93,000 (DOWN) for cooldown duration
     const levelUpKey = `${symbol}_${nextLevelUp}`;
     const levelDownKey = `${symbol}_${nextLevelDown}`;
-
+      
     // HYSTERESIS CHECK: If price is still within "Close Range" of last triggered level, suppress ALL alerts
     const lastTriggered = this.lastTriggeredLevel.get(symbol);
     if (lastTriggered) {
@@ -248,7 +248,7 @@ export class AutoPriceAlertService {
       const timeSince = Date.now() - timestamp;
       const closeRange = lastLevel * (this.HYSTERESIS_CLOSE_RANGE_PERCENT / 100);
       const distanceFromLastLevel = Math.abs(currentPrice - lastLevel);
-      
+        
       // If still within cooldown AND within close range, suppress all alerts for this symbol
       if (timeSince < this.NOTIFICATION_COOLDOWN && distanceFromLastLevel <= closeRange) {
         // Price is still wobbling around the last notified level - suppress
@@ -276,7 +276,7 @@ export class AutoPriceAlertService {
     // Check unified cooldown for DOWN level
     if (this.shouldNotify(levelDownKey)) {
       await this.checkLevelApproach(symbol, currentPrice, prevPrice, nextLevelDown, proximityDeltaDown, 'down', name, emoji, config);
-    }
+          }
   }
 
   /**
@@ -295,7 +295,7 @@ export class AutoPriceAlertService {
 
     // 🔥 UNIFIED LEVEL KEY: No direction in key - prevents UP/DOWN flickering
     const levelKey = `${symbol}_${targetLevel}`;
-    
+      
     // Check if already triggered (in-memory check)
     if (this.isTriggered(levelKey)) {
       return;
@@ -318,10 +318,10 @@ export class AutoPriceAlertService {
       // Price just crossed the level - don't send notification (spam prevention)
       return;
     }
-
+        
     // Fiyat yuvarlak sayıya çok yakınsa (zona muerta içinde) VE hareket hedefe doğru değilse bildirim GÖNDERME
     const tooCloseToTarget = currentPrice >= deadZone.lower && currentPrice <= deadZone.upper;
-    
+        
     // Bildirim gönder: Zona muerta dışında VEYA hedefe doğru hareket
     if (!tooCloseToTarget || isMovingTowards) {
       // 🔥 CRITICAL: Mark as triggered BEFORE sending (prevents race condition)
@@ -337,28 +337,28 @@ export class AutoPriceAlertService {
 
       const directionEmoji = direction === 'up' ? '📈' : '📉';
       const directionText = direction === 'up' ? 'yaklaşıyor' : 'iniyor';
-      
+          
       console.log(`${directionEmoji} ${name} ${targetLevel.toLocaleString()}$ seviyesine ${directionText} (şu an: ${currentPrice.toFixed(2)}$, mesafe: ${distance.toFixed(2)}$)`);
       console.log(`   💡 Zona muerta: ${deadZone.lower.toFixed(2)} - ${deadZone.upper.toFixed(2)}, Hareket: ${isMovingTowards ? '✅ Hedefe doğru' : '❌ Hedefe doğru değil'}`);
       console.log(`   🔒 Unified cooldown key: ${levelKey} (applies to both UP and DOWN)`);
-      
-      try {
-        await this.sendNotificationToAll(
-          symbol,
-          name,
-          emoji,
-          currentPrice,
+          
+          try {
+            await this.sendNotificationToAll(
+              symbol,
+              name,
+              emoji,
+              currentPrice,
           targetLevel,
           direction
-        );
-      } catch (error) {
+            );
+          } catch (error) {
         console.error(`❌ Error sending notification for ${symbol} ${targetLevel}$:`, error);
-        // Hata durumunda trigger'ı geri al (bir sonraki denemede tekrar gönderilebilir)
+            // Hata durumunda trigger'ı geri al (bir sonraki denemede tekrar gönderilebilir)
         this.clearTriggered(levelKey);
         this.lastTriggeredLevel.delete(symbol);
-      }
-    } else {
-      console.log(`⏸️  ${name} zona muerta içinde (${currentPrice.toFixed(2)}$), bildirim bekleniyor...`);
+          }
+        } else {
+          console.log(`⏸️  ${name} zona muerta içinde (${currentPrice.toFixed(2)}$), bildirim bekleniyor...`);
     }
   }
 
@@ -415,6 +415,10 @@ export class AutoPriceAlertService {
    * OPTIMIZED: Tek bir SQL sorgusu ile premium/trial kullanıcıların cihazlarını çekiyor
    * Artık her cihaz için ayrı getUserById çağrısı yapmıyor - çok daha hızlı!
    */
+  /**
+   * 🔥 MULTILINGUAL: Send notifications grouped by language
+   * Turkish devices get Turkish messages, others get English (Global)
+   */
   async sendNotificationToAll(symbol, name, emoji, currentPrice, targetPrice, direction) {
     try {
       // 🔥 OPTIMIZED: Tek sorguda premium/trial kullanıcıların TÜM cihazlarını al
@@ -428,22 +432,15 @@ export class AutoPriceAlertService {
 
       console.log(`🔍 Found ${devices.length} premium/trial device(s) from database query`);
       
-      // DEBUG: Log all devices found
-      if (devices.length > 0) {
-        console.log(`📋 Devices breakdown:`);
-        devices.forEach((device, index) => {
-          console.log(`   ${index + 1}. ${device.email} (ID: ${device.user_id}) - Device: ${device.device_id}, Plan: ${device.plan}, Expiry: ${device.expiry_date || 'LIFETIME'}`);
-        });
-      }
-
-      // Push token'ları topla
-      // Support both Expo tokens and FCM tokens
-      const uniqueTokens = new Set();
-      let validDevicesCount = 0;
+      // 🔥 MULTILINGUAL: Tokenları dile göre ayır
+      const trTokens = [];
+      const enTokens = []; // Türkçe olmayan herkes buraya (Global)
+      let trCount = 0;
+      let enCount = 0;
       let invalidTokensSkipped = 0;
-      const userEmails = new Set(); // Debug için: kaç farklı kullanıcı var
+      const userEmails = new Set();
 
-      // Her cihaz için token kontrolü yap (premium kontrolü zaten SQL'de yapıldı)
+      // Her cihaz için token kontrolü yap ve dile göre grupla
       for (const device of devices) {
         const token = device.expo_push_token;
         if (!token) {
@@ -464,48 +461,83 @@ export class AutoPriceAlertService {
           continue;
         }
 
-        // Token geçerli - ekle
-        uniqueTokens.add(token);
-        validDevicesCount++;
+        // 🔥 MULTILINGUAL: Dil kontrolü (veritabanından 'language' alanı)
+        // Varsayılan olarak 'tr' kabul ediyoruz (backward compatibility)
+        const lang = device.language ? device.language.toLowerCase() : 'tr';
+        const isTurkish = lang.startsWith('tr');
+
+        if (isTurkish) {
+          trTokens.push(token);
+          trCount++;
+        } else {
+          enTokens.push(token);
+          enCount++;
+        }
+
         if (device.email) {
           userEmails.add(device.email);
         }
       }
 
-      const tokens = Array.from(uniqueTokens);
-
       console.log(`🔒 Premium check results:`);
-      console.log(`   ✅ Premium/Trial devices: ${validDevicesCount}`);
+      console.log(`   🇹🇷 Turkish devices: ${trCount}`);
+      console.log(`   🌍 Global (non-Turkish) devices: ${enCount}`);
       console.log(`   👥 Unique premium/trial users: ${userEmails.size}`);
       console.log(`   🚫 Invalid tokens skipped: ${invalidTokensSkipped}`);
-      console.log(`   📋 User emails: ${Array.from(userEmails).join(', ')}`);
 
-      if (tokens.length === 0) {
+      if (trTokens.length === 0 && enTokens.length === 0) {
         console.log('📱 No valid premium/trial device tokens found - notification not sent');
         return;
       }
 
-      console.log(`📤 Sending notification to ${tokens.length} premium/trial device(s)...`);
-
-      // Bildirim mesajı
+      // 🔥 MULTILINGUAL: Mesajları hazırla
       const directionEmoji = direction === 'up' ? '📈' : '📉';
-      const directionText = direction === 'up' ? 'yaklaşıyor' : 'iniyor';
-      const title = `${symbol} ${directionEmoji}`;
-      const body = `${symbol} ${targetPrice.toLocaleString()} $ seviyesine ${directionText}! Şu anki fiyat: ${currentPrice.toFixed(2)}`;
+      
+      // TR Mesajı
+      const actionTextTr = direction === 'up' ? 'yaklaşıyor' : 'iniyor';
+      const titleTr = `${symbol} ${directionEmoji}`;
+      const formattedTargetTr = targetPrice.toLocaleString('en-US');
+      const formattedCurrentTr = currentPrice.toFixed(2);
+      const bodyTr = `${symbol} ${formattedTargetTr} $ seviyesine ${actionTextTr}! Şu anki fiyat: ${formattedCurrentTr}`;
 
-      // Push notification gönder
-      const success = await sendPriceAlertNotification(
-        tokens,
-        symbol,
-        currentPrice,
-        targetPrice,
-        direction
-      );
+      // EN Mesajı (Global - diğer herkes için)
+      const actionTextEn = direction === 'up' ? 'is approaching' : 'is dropping to';
+      const titleEn = `${symbol} ${directionEmoji}`;
+      const formattedTargetEn = targetPrice.toLocaleString('en-US');
+      const formattedCurrentEn = currentPrice.toFixed(2);
+      const bodyEn = `${symbol} ${actionTextEn} ${formattedTargetEn} $ level! Current price: ${formattedCurrentEn}`;
 
-      if (success) {
-        console.log(`✅ Notification sent to ${tokens.length} premium/trial device(s) from ${userEmails.size} user(s): ${title} - ${body}`);
+      // 🔥 MULTILINGUAL: Paralel gönderim
+      const promises = [];
+      
+      if (trTokens.length > 0) {
+        console.log(`🇹🇷 Sending TR notification to ${trTokens.length} device(s)`);
+        promises.push(
+          sendPriceAlertNotification(trTokens, symbol, currentPrice, targetPrice, direction, titleTr, bodyTr)
+        );
+      }
+
+      if (enTokens.length > 0) {
+        console.log(`🌍 Sending EN (Global) notification to ${enTokens.length} device(s)`);
+        promises.push(
+          sendPriceAlertNotification(enTokens, symbol, currentPrice, targetPrice, direction, titleEn, bodyEn)
+        );
+      }
+
+      // Tüm bildirimleri paralel gönder
+      const results = await Promise.all(promises);
+      const allSuccess = results.every(r => r === true);
+
+      if (allSuccess) {
+        console.log(`✅ Notifications sent successfully:`);
+        if (trTokens.length > 0) {
+          console.log(`   🇹🇷 TR: ${trTokens.length} device(s) - ${titleTr} - ${bodyTr}`);
+        }
+        if (enTokens.length > 0) {
+          console.log(`   🌍 EN: ${enTokens.length} device(s) - ${titleEn} - ${bodyEn}`);
+        }
       } else {
-        console.log(`❌ Failed to send notification`);
+        console.log(`❌ Some notifications failed to send`);
       }
     } catch (error) {
       console.error('❌ Error sending notification to all:', error);

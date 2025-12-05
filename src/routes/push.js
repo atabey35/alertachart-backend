@@ -21,7 +21,7 @@ const router = express.Router();
  */
 router.post('/register', optionalAuth, async (req, res) => {
   try {
-    const { deviceId, token, expoPushToken, platform, appVersion, model, osVersion } = req.body;
+    const { deviceId, token, expoPushToken, platform, appVersion, model, osVersion, language } = req.body;
 
     // Support both 'token' (FCM) and 'expoPushToken' (legacy Expo)
     const pushToken = token || expoPushToken;
@@ -52,7 +52,7 @@ router.post('/register', optionalAuth, async (req, res) => {
       console.log(`[Push Register]    Auth header: ${req.headers['authorization'] ? 'present' : 'none'}`);
     }
 
-    // Upsert device
+    // Upsert device (with language support)
     const device = await upsertDevice(
       deviceId,
       pushToken,
@@ -60,7 +60,8 @@ router.post('/register', optionalAuth, async (req, res) => {
       appVersion || '1.0.0',
       userId,
       model || 'Unknown',
-      osVersion || 'Unknown'
+      osVersion || 'Unknown',
+      language || 'tr' // Default to Turkish if not provided
     );
 
     console.log(`✅ Device registered: ${deviceId} (${platform})${userId ? ` for user ${userId}` : ' (not linked - will be linked on login)'}`);
@@ -137,7 +138,23 @@ router.post('/test', async (req, res) => {
     }
 
     console.log(`[Test Push] Sending to token: ${pushToken.substring(0, 30)}...`);
-    const success = await sendTestNotification(pushToken);
+    
+    // 🔥 MULTILINGUAL: Get device language for test notification
+    let customTitle = null;
+    let customBody = null;
+    if (deviceId) {
+      const device = await getDevice(deviceId);
+      if (device && device.language) {
+        const lang = device.language.toLowerCase();
+        if (!lang.startsWith('tr')) {
+          // English test notification
+          customTitle = 'Test Notification 🎉';
+          customBody = 'Push notification system is working successfully!';
+        }
+      }
+    }
+    
+    const success = await sendTestNotification(pushToken, customTitle, customBody);
 
     if (success) {
       console.log(`✅ Test notification sent successfully`);

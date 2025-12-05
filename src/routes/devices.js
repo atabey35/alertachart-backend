@@ -17,7 +17,7 @@ const router = express.Router();
  */
 router.post('/register-native', async (req, res) => {
   try {
-    const { deviceId, pushToken, platform, appVersion } = req.body;
+    const { deviceId, pushToken, platform, appVersion, language } = req.body;
 
     // Validation
     if (!deviceId || !pushToken || !platform) {
@@ -49,7 +49,8 @@ router.post('/register-native', async (req, res) => {
       appVersion || '1.0.0',
       null, // userId = null (not linked yet)
       null, // model
-      null  // osVersion
+      null, // osVersion
+      language || 'tr' // Default to Turkish if not provided
     );
 
     console.log(`✅ Native device registered: ${deviceId} (${platform}) - NOT linked to user yet`);
@@ -79,7 +80,7 @@ router.post('/register-native', async (req, res) => {
  */
 router.post('/link', authenticateToken, async (req, res) => {
   try {
-    const { deviceId, pushToken, platform } = req.body;
+    const { deviceId, pushToken, platform, language } = req.body;
 
     // Validation
     if (!deviceId) {
@@ -137,7 +138,8 @@ router.post('/link', authenticateToken, async (req, res) => {
         '1.0.0', // Default app version
         userId, // Link to user immediately
         null, // model
-        null  // osVersion
+        null, // osVersion
+        language || 'tr' // Default to Turkish if not provided
       );
       
       console.log(`✅ Device ${deviceId} created automatically and linked to user ${userId}${pushToken ? ' (with push token)' : ' (push token will be added later)'}`);
@@ -169,16 +171,18 @@ router.post('/link', authenticateToken, async (req, res) => {
           UPDATE devices
           SET user_id = ${userId},
               expo_push_token = ${pushToken},
+              language = ${language || 'tr'},
               updated_at = CURRENT_TIMESTAMP
           WHERE device_id = ${deviceId}
           RETURNING *
         `;
         device = updateResult[0];
       } else {
-        // Just update userId
+        // Just update userId and language
         const updateResult = await sql`
           UPDATE devices
           SET user_id = ${userId},
+              language = ${language || 'tr'},
               updated_at = CURRENT_TIMESTAMP
           WHERE device_id = ${deviceId}
           RETURNING *

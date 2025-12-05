@@ -14,7 +14,8 @@ const router = express.Router();
  */
 router.post('/broadcast', async (req, res) => {
   try {
-    const { title, message } = req.body;
+    // 🔥 MULTILINGUAL: targetLang: 'all', 'tr', 'en' (en = non-tr, Global)
+    const { title, message, targetLang = 'all' } = req.body;
 
     // Validation
     if (!title || !message) {
@@ -23,24 +24,44 @@ router.post('/broadcast', async (req, res) => {
       });
     }
 
-    console.log(`📢 Admin broadcast request: "${title}"`);
+    console.log(`📢 Admin broadcast request: "${title}" (target: ${targetLang})`);
 
     // Get ALL active devices
     const devices = await getAllActiveDevices();
+    
+    // 🔥 MULTILINGUAL: Filtreleme mantığı
+    const filteredDevices = devices.filter(d => {
+      const deviceLang = d.language ? d.language.toLowerCase() : 'tr';
+      const isTr = deviceLang.startsWith('tr');
+      
+      if (targetLang === 'tr') {
+        // Sadece Türkçe cihazlar
+        return isTr;
+      } else if (targetLang === 'en') {
+        // Türkçe OLMAYAN cihazlar (Global)
+        return !isTr;
+      } else {
+        // 'all' seçilirse herkese
+        return true;
+      }
+    });
+    
+    console.log(`📊 Filtered devices: ${filteredDevices.length} / ${devices.length} (target: ${targetLang})`);
 
-    if (devices.length === 0) {
-      console.log('📱 No active devices found');
+    if (filteredDevices.length === 0) {
+      console.log(`📱 No active devices found for target: ${targetLang}`);
       return res.json({ 
         success: true, 
-        message: 'No active devices',
+        message: `No active devices for target: ${targetLang}`,
         sent: 0,
-        totalDevices: 0,
+        totalDevices: devices.length,
+        filteredDevices: 0,
       });
     }
 
     // Collect valid push tokens with device info (exclude test tokens and placeholders)
     // Support both Expo tokens and FCM tokens
-    const deviceTokens = devices
+    const deviceTokens = filteredDevices
       .map(d => ({
         token: d.expo_push_token,
         platform: d.platform,
@@ -65,19 +86,20 @@ router.post('/broadcast', async (req, res) => {
       });
 
     if (deviceTokens.length === 0) {
-      console.log('📱 No valid push tokens found');
+      console.log(`📱 No valid push tokens found for target: ${targetLang}`);
       return res.json({ 
         success: true, 
-        message: 'No valid tokens',
+        message: `No valid tokens for target: ${targetLang}`,
         sent: 0,
         totalDevices: devices.length,
+        filteredDevices: filteredDevices.length,
       });
     }
 
     // Log platform breakdown
     const iosDevices = deviceTokens.filter(d => d.platform === 'ios');
     const androidDevices = deviceTokens.filter(d => d.platform === 'android');
-    console.log(`📤 Broadcasting to ${deviceTokens.length} device(s)...`);
+    console.log(`📤 Broadcasting to ${deviceTokens.length} device(s) (target: ${targetLang})...`);
     console.log(`   iOS devices: ${iosDevices.length}`);
     console.log(`   Android devices: ${androidDevices.length}`);
     console.log(`   First token example: ${deviceTokens[0].token.substring(0, 50)}...`);
@@ -120,6 +142,8 @@ router.post('/broadcast', async (req, res) => {
         success: true,
         sent: tokens.length,
         totalDevices: devices.length,
+        filteredDevices: filteredDevices.length,
+        targetLang: targetLang,
         title,
         message,
       });

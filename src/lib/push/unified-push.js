@@ -58,9 +58,38 @@ export async function sendPushNotifications(payloads) {
 
 /**
  * Send price alert notification (unified)
+ * 🔥 MULTILINGUAL: Supports custom title/body for different languages
+ * @param {string|string[]} tokens - Device push tokens
+ * @param {string} symbol - Trading symbol (e.g., BTCUSDT)
+ * @param {number} currentPrice - Current price
+ * @param {number} targetPrice - Target price
+ * @param {string} direction - 'up' or 'down'
+ * @param {string} [customTitle] - Optional custom title (for multilingual support)
+ * @param {string} [customBody] - Optional custom body (for multilingual support)
  */
-export async function sendPriceAlertNotification(tokens, symbol, currentPrice, targetPrice, direction) {
+export async function sendPriceAlertNotification(tokens, symbol, currentPrice, targetPrice, direction, customTitle = null, customBody = null) {
   const emoji = direction === 'up' ? '📈' : '📉';
+  
+  // If custom title/body provided, use them (for multilingual support)
+  if (customTitle && customBody) {
+    return sendPushNotifications([{
+      to: tokens,
+      title: customTitle,
+      body: customBody,
+      data: {
+        type: 'price_alert',
+        symbol: symbol,
+        price: currentPrice.toString(),
+        targetPrice: targetPrice.toString(),
+        direction: direction,
+      },
+      sound: 'default',
+      channelId: 'price-alerts-v2',
+      priority: 'high',
+    }]);
+  }
+  
+  // Default Turkish message (backward compatibility)
   const actionText = direction === 'up' ? 'yaklaşıyor' : 'iniyor';
   
   // Format prices nicely
@@ -110,8 +139,23 @@ export async function sendAlarmNotification(tokens, symbol, message, alarmData) 
 
 /**
  * Send test notification (unified)
+ * 🔥 MULTILINGUAL: Supports custom title/body for different languages
+ * @param {string} token - Device push token
+ * @param {string} [customTitle] - Optional custom title (for multilingual support)
+ * @param {string} [customBody] - Optional custom body (for multilingual support)
  */
-export async function sendTestNotification(token) {
+export async function sendTestNotification(token, customTitle = null, customBody = null) {
+  // If custom title/body provided, use them (for multilingual support)
+  if (customTitle && customBody) {
+    return sendPushNotification(
+      token,
+      customTitle,
+      customBody,
+      { test: true, timestamp: Date.now() }
+    );
+  }
+  
+  // Default Turkish message (backward compatibility)
   return sendPushNotification(
     token,
     'Test Bildirimi 🎉',
