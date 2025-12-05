@@ -401,38 +401,48 @@ export async function getActivePriceAlertsBySymbol(symbol) {
   const sql = getSql();
   
   // Only return alerts for premium/trial users
+  // 🔥 APPLE GUIDELINE 5.1.1: Supports guest users via device_id matching
   return await sql`
     SELECT 
       pa.*, 
       d.expo_push_token, 
       d.platform,
       d.user_id,
-      u.plan,
-      u.expiry_date,
-      u.trial_started_at,
-      u.trial_ended_at
+      COALESCE(u.plan, u_guest.plan) as plan,
+      COALESCE(u.expiry_date, u_guest.expiry_date) as expiry_date,
+      COALESCE(u.trial_started_at, u_guest.trial_started_at) as trial_started_at,
+      COALESCE(u.trial_ended_at, u_guest.trial_ended_at) as trial_ended_at
     FROM price_alerts pa
     JOIN devices d ON pa.device_id = d.device_id
-    LEFT JOIN users u ON d.user_id = u.id
+    -- Normal users: match by user_id
+    LEFT JOIN users u ON d.user_id = u.id AND d.user_id IS NOT NULL
+    -- Guest users: match by device_id
+    LEFT JOIN users u_guest ON d.device_id = u_guest.device_id AND u_guest.provider = 'guest' AND d.user_id IS NULL
     WHERE pa.symbol = ${symbol.toUpperCase()}
       AND pa.is_active = true
       AND d.is_active = true
-      AND d.user_id IS NOT NULL
+      AND (
+        -- Normal users: user_id must be set
+        (d.user_id IS NOT NULL AND u.id IS NOT NULL)
+        OR
+        -- Guest users: device_id must match
+        (d.user_id IS NULL AND u_guest.id IS NOT NULL)
+      )
       AND (
         -- Premium users (with or without expiry)
-        (u.plan = 'premium' AND (u.expiry_date IS NULL OR u.expiry_date > CURRENT_TIMESTAMP))
+        (COALESCE(u.plan, u_guest.plan) = 'premium' AND (COALESCE(u.expiry_date, u_guest.expiry_date) IS NULL OR COALESCE(u.expiry_date, u_guest.expiry_date) > CURRENT_TIMESTAMP))
         OR
         -- Trial users (active trial)
         (
-          u.plan = 'free' 
-          AND u.trial_started_at IS NOT NULL
-          AND u.trial_started_at <= CURRENT_TIMESTAMP
+          COALESCE(u.plan, u_guest.plan) = 'free' 
+          AND COALESCE(u.trial_started_at, u_guest.trial_started_at) IS NOT NULL
+          AND COALESCE(u.trial_started_at, u_guest.trial_started_at) <= CURRENT_TIMESTAMP
           AND (
             -- Trial ended_at yoksa, 3 gün hesapla
-            (u.trial_ended_at IS NULL AND (u.trial_started_at + INTERVAL '3 days') > CURRENT_TIMESTAMP)
+            (COALESCE(u.trial_ended_at, u_guest.trial_ended_at) IS NULL AND (COALESCE(u.trial_started_at, u_guest.trial_started_at) + INTERVAL '3 days') > CURRENT_TIMESTAMP)
             OR
             -- Trial ended_at varsa, kontrol et
-            (u.trial_ended_at IS NOT NULL AND u.trial_ended_at > CURRENT_TIMESTAMP)
+            (COALESCE(u.trial_ended_at, u_guest.trial_ended_at) IS NOT NULL AND COALESCE(u.trial_ended_at, u_guest.trial_ended_at) > CURRENT_TIMESTAMP)
           )
         )
       )
@@ -442,11 +452,13 @@ export async function getActivePriceAlertsBySymbol(symbol) {
 /**
  * Get all active custom price alerts (for all symbols)
  * Used to discover which symbols need WebSocket connections
+ * 🔥 APPLE GUIDELINE 5.1.1: Supports guest users via device_id matching
  */
 export async function getAllActiveCustomAlerts() {
   const sql = getSql();
   
   // Only return alerts for premium/trial users
+  // Supports both normal users (via user_id) and guest users (via device_id)
   return await sql`
     SELECT 
       pa.*, 
@@ -454,31 +466,40 @@ export async function getAllActiveCustomAlerts() {
       d.platform,
       d.language,
       d.user_id,
-      u.plan,
-      u.expiry_date,
-      u.trial_started_at,
-      u.trial_ended_at
+      COALESCE(u.plan, u_guest.plan) as plan,
+      COALESCE(u.expiry_date, u_guest.expiry_date) as expiry_date,
+      COALESCE(u.trial_started_at, u_guest.trial_started_at) as trial_started_at,
+      COALESCE(u.trial_ended_at, u_guest.trial_ended_at) as trial_ended_at
     FROM price_alerts pa
     JOIN devices d ON pa.device_id = d.device_id
-    LEFT JOIN users u ON d.user_id = u.id
+    -- Normal users: match by user_id
+    LEFT JOIN users u ON d.user_id = u.id AND d.user_id IS NOT NULL
+    -- Guest users: match by device_id
+    LEFT JOIN users u_guest ON d.device_id = u_guest.device_id AND u_guest.provider = 'guest' AND d.user_id IS NULL
     WHERE pa.is_active = true
       AND d.is_active = true
-      AND d.user_id IS NOT NULL
+      AND (
+        -- Normal users: user_id must be set
+        (d.user_id IS NOT NULL AND u.id IS NOT NULL)
+        OR
+        -- Guest users: device_id must match
+        (d.user_id IS NULL AND u_guest.id IS NOT NULL)
+      )
       AND (
         -- Premium users (with or without expiry)
-        (u.plan = 'premium' AND (u.expiry_date IS NULL OR u.expiry_date > CURRENT_TIMESTAMP))
+        (COALESCE(u.plan, u_guest.plan) = 'premium' AND (COALESCE(u.expiry_date, u_guest.expiry_date) IS NULL OR COALESCE(u.expiry_date, u_guest.expiry_date) > CURRENT_TIMESTAMP))
         OR
         -- Trial users (active trial)
         (
-          u.plan = 'free' 
-          AND u.trial_started_at IS NOT NULL
-          AND u.trial_started_at <= CURRENT_TIMESTAMP
+          COALESCE(u.plan, u_guest.plan) = 'free' 
+          AND COALESCE(u.trial_started_at, u_guest.trial_started_at) IS NOT NULL
+          AND COALESCE(u.trial_started_at, u_guest.trial_started_at) <= CURRENT_TIMESTAMP
           AND (
             -- Trial ended_at yoksa, 3 gün hesapla
-            (u.trial_ended_at IS NULL AND (u.trial_started_at + INTERVAL '3 days') > CURRENT_TIMESTAMP)
+            (COALESCE(u.trial_ended_at, u_guest.trial_ended_at) IS NULL AND (COALESCE(u.trial_started_at, u_guest.trial_started_at) + INTERVAL '3 days') > CURRENT_TIMESTAMP)
             OR
             -- Trial ended_at varsa, kontrol et
-            (u.trial_ended_at IS NOT NULL AND u.trial_ended_at > CURRENT_TIMESTAMP)
+            (COALESCE(u.trial_ended_at, u_guest.trial_ended_at) IS NOT NULL AND COALESCE(u.trial_ended_at, u_guest.trial_ended_at) > CURRENT_TIMESTAMP)
           )
         )
       )

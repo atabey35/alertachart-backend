@@ -9,7 +9,7 @@ import {
   deletePriceAlert,
 } from '../lib/push/db.js';
 import { authenticateToken, optionalAuth } from '../lib/auth/middleware.js';
-import { getUserById, getSessionByRefreshToken } from '../lib/auth/db.js';
+import { getUserById, getSessionByRefreshToken, getUserByEmail, getSql as getAuthSql } from '../lib/auth/db.js';
 import { generateAccessToken, verifyRefreshToken } from '../lib/auth/jwt.js';
 
 const router = express.Router();
@@ -57,7 +57,7 @@ router.post('/price', optionalAuth, async (req, res) => {
       userEmail: req.user?.email,
     });
 
-    const { deviceId, symbol, targetPrice, proximityDelta, direction } = req.body;
+    const { deviceId, symbol, targetPrice, proximityDelta, direction, userEmail } = req.body;
 
     // Validation
     if (!deviceId || !symbol || !targetPrice || !proximityDelta || !direction) {
@@ -74,6 +74,39 @@ router.post('/price', optionalAuth, async (req, res) => {
 
     // Premium check - if no user, try to refresh token
     let userId = req.user?.userId;
+    
+    // 🔥 CRITICAL: For guest users, if no userId from cookie/token, try to find user by device_id and userEmail
+    if (!userId && userEmail && deviceId) {
+      console.log('[Alerts POST] 🔓 Guest user detected, trying to find user by device_id and email:', {
+        userEmail,
+        deviceId: deviceId.substring(0, 20) + '...',
+      });
+      
+      try {
+        const sql = getAuthSql();
+        const guestUsers = await sql`
+          SELECT id, email, plan, expiry_date, trial_started_at, trial_ended_at
+          FROM users 
+          WHERE email = ${userEmail} 
+          AND device_id = ${deviceId}
+          AND provider = 'guest'
+          LIMIT 1
+        `;
+        
+        if (guestUsers.length > 0) {
+          userId = guestUsers[0].id;
+          console.log('[Alerts POST] ✅ Guest user found by device_id and email:', {
+            userId,
+            email: guestUsers[0].email,
+            plan: guestUsers[0].plan,
+          });
+        } else {
+          console.log('[Alerts POST] ⚠️ Guest user not found by device_id and email');
+        }
+      } catch (guestError) {
+        console.error('[Alerts POST] ❌ Error finding guest user:', guestError);
+      }
+    }
     
     // 🔥 CRITICAL: Also check cookie header (for subdomain/cross-origin requests)
     const cookieHeader = req.headers.cookie || '';
@@ -150,10 +183,12 @@ router.post('/price', optionalAuth, async (req, res) => {
     }
     
     if (!userId) {
-      console.log('[Alerts POST] ❌ No userId found in req.user');
+      console.log('[Alerts POST] ❌ No userId found');
       console.log('[Alerts POST] req.user:', req.user);
       console.log('[Alerts POST] req.cookies:', req.cookies);
       console.log('[Alerts POST] cookieHeader:', cookieHeader ? `${cookieHeader.substring(0, 100)}...` : 'none');
+      console.log('[Alerts POST] userEmail from body:', userEmail || 'not provided');
+      console.log('[Alerts POST] deviceId from body:', deviceId ? `${deviceId.substring(0, 20)}...` : 'not provided');
       return res.status(401).json({
         error: 'Authentication required'
       });
@@ -199,7 +234,39 @@ router.get('/price', optionalAuth, async (req, res) => {
     }
 
     // Premium check
-    const userId = req.user?.userId;
+    let userId = req.user?.userId;
+    
+    // 🔥 CRITICAL: For guest users, if no userId from cookie/token, try to find user by device_id
+    if (!userId && deviceId) {
+      console.log('[Alerts GET] 🔓 Guest user detected, trying to find user by device_id:', {
+        deviceId: deviceId.substring(0, 20) + '...',
+      });
+      
+      try {
+        const sql = getAuthSql();
+        const guestUsers = await sql`
+          SELECT id, email, plan, expiry_date, trial_started_at, trial_ended_at
+          FROM users 
+          WHERE device_id = ${deviceId}
+          AND provider = 'guest'
+          LIMIT 1
+        `;
+        
+        if (guestUsers.length > 0) {
+          userId = guestUsers[0].id;
+          console.log('[Alerts GET] ✅ Guest user found by device_id:', {
+            userId,
+            email: guestUsers[0].email,
+            plan: guestUsers[0].plan,
+          });
+        } else {
+          console.log('[Alerts GET] ⚠️ Guest user not found by device_id');
+        }
+      } catch (guestError) {
+        console.error('[Alerts GET] ❌ Error finding guest user:', guestError);
+      }
+    }
+    
     if (!userId) {
       return res.status(401).json({
         error: 'Authentication required'
