@@ -215,9 +215,11 @@ export async function upsertDevice(deviceId, expoPushToken, platform, appVersion
         WHEN ${osVersion}::text IS NOT NULL THEN ${osVersion}::text
         ELSE devices.os_version
       END,
-      -- 🔥 MULTILINGUAL: Update language if provided
+      -- 🔥 MULTILINGUAL: Update language if provided, otherwise keep existing
+      -- BUT: If existing language is NULL and new language is provided, update it
       language = CASE 
         WHEN ${deviceLanguage}::text IS NOT NULL THEN ${deviceLanguage}::text
+        WHEN devices.language IS NULL THEN 'tr'::text  -- Default to 'tr' if both are NULL
         ELSE devices.language
       END,
       is_active = true,
@@ -226,10 +228,11 @@ export async function upsertDevice(deviceId, expoPushToken, platform, appVersion
   `;
   
   // Debug log
+  const deviceLanguage = language || 'tr';
   if (userId) {
-    console.log(`[upsertDevice] ✅ Device ${deviceId} linked to user ${userId}`);
+    console.log(`[upsertDevice] ✅ Device ${deviceId} linked to user ${userId}, language: ${deviceLanguage}`);
   } else {
-    console.log(`[upsertDevice] ⚠️  Device ${deviceId} registered without user_id (will be linked on login)`);
+    console.log(`[upsertDevice] ⚠️  Device ${deviceId} registered without user_id (will be linked on login), language: ${deviceLanguage}`);
   }
   
   return result[0];
