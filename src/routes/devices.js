@@ -37,6 +37,7 @@ router.post('/register-native', async (req, res) => {
 
     console.log(`[Device Register Native] Registering device: ${deviceId} (${platform})`);
     console.log(`[Device Register Native] Token: ${pushToken.substring(0, 30)}...`);
+    console.log(`[Device Register Native] Language: ${language || 'not provided (default: tr)'}`); // 🔥 MULTILINGUAL: Log language
 
     // Initialize database (first time)
     await initPushDatabase();
@@ -53,7 +54,7 @@ router.post('/register-native', async (req, res) => {
       language || 'tr' // Default to Turkish if not provided
     );
 
-    console.log(`✅ Native device registered: ${deviceId} (${platform}) - NOT linked to user yet`);
+    console.log(`✅ Native device registered: ${deviceId} (${platform}) - Language: ${device.language || 'tr'} - NOT linked to user yet`);
 
     res.json({
       success: true,

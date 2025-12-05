@@ -84,10 +84,27 @@ app.use((req, res) => {
   res.status(404).json({ error: 'Not found' });
 });
 
+// 🔥 CRITICAL: Add error handler for uncaught exceptions
+process.on('uncaughtException', (error) => {
+  console.error('❌ UNCAUGHT EXCEPTION:', error);
+  console.error('❌ Error name:', error.name);
+  console.error('❌ Error message:', error.message);
+  console.error('❌ Error stack:', error.stack);
+  process.exit(1);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('❌ UNHANDLED REJECTION at:', promise);
+  console.error('❌ Reason:', reason);
+  process.exit(1);
+});
+
 app.listen(PORT, async () => {
   console.log(`🚀 Alerta Chart Backend running on port ${PORT}`);
   console.log(`📊 Environment: ${process.env.NODE_ENV || 'development'}`);
   console.log(`🌍 CORS enabled for: ${allowedOrigins.join(', ')}`);
+  console.log(`🔍 Node.js version: ${process.version}`);
+  console.log(`🔍 Process PID: ${process.pid}`);
   
   // Initialize databases
   console.log('');
