@@ -284,22 +284,35 @@ router.post('/notify', optionalAuth, async (req, res) => {
       });
     }
 
-    // Collect valid push tokens (exclude test tokens)
-    // Support both Expo tokens and FCM tokens
-    const tokens = devices
-      .map(d => d.expo_push_token)
-      .filter(token => {
-        if (!token) return false;
-        // Exclude any test tokens (case-insensitive)
-        const lowerToken = token.toLowerCase();
-        if (lowerToken.includes('test') || lowerToken === 'unknown') return false;
-        // Accept both Expo tokens and FCM tokens
-        // Expo: ExponentPushToken[...] or ExpoPushToken[...]
-        // FCM: long string without brackets
-        return token.length > 10; // Simple validation
-      });
+    // 🔥 MULTILINGUAL: Tokenları dile göre ayır ve mesajları çevir
+    const trTokens = [];
+    const enTokens = [];
+    const trDevices = [];
+    const enDevices = [];
 
-    if (tokens.length === 0) {
+    for (const device of devices) {
+      const token = device.expo_push_token;
+      if (!token) continue;
+      
+      // Exclude test tokens
+      const lowerToken = token.toLowerCase();
+      if (lowerToken.includes('test') || lowerToken === 'unknown') continue;
+      if (token.length <= 10) continue;
+
+      // 🔥 MULTILINGUAL: Dil kontrolü
+      const lang = device.language ? device.language.toLowerCase() : 'tr';
+      const isTurkish = lang.startsWith('tr');
+
+      if (isTurkish) {
+        trTokens.push(token);
+        trDevices.push(device);
+      } else {
+        enTokens.push(token);
+        enDevices.push(device);
+      }
+    }
+
+    if (trTokens.length === 0 && enTokens.length === 0) {
       console.log('📱 No valid push tokens found');
       return res.json({ 
         success: true, 
@@ -308,23 +321,74 @@ router.post('/notify', optionalAuth, async (req, res) => {
       });
     }
 
-    console.log(`📱 Sending alarm notification to ${tokens.length} device(s): ${symbol}${targetDeviceInfo ? ` (${targetDeviceInfo})` : ''}`);
+    console.log(`📱 Sending alarm notification: ${trTokens.length} TR device(s), ${enTokens.length} EN device(s)`);
 
-    // Send push notification
-    const success = await sendAlarmNotification(
-      tokens,
-      symbol,
-      message,
-      data
-    );
+    // 🔥 MULTILINGUAL: Mesajları çevir
+    const upperSymbol = symbol.toUpperCase();
+    
+    // TR Mesajı (orijinal mesaj)
+    const titleTr = `Fiyat Alarmı: ${upperSymbol}`;
+    const bodyTr = message; // Frontend'den gelen mesaj zaten Türkçe
 
-    if (success) {
-      console.log(`✅ Alarm notifications sent to ${tokens.length} devices`);
+    // EN Mesajı (çeviri)
+    // Frontend'den gelen mesaj formatı: "BTCUSDT fiyatı 89446.50 seviyesine ulaştı!" veya "düştü!"
+    // İngilizce: "BTCUSDT price reached 89446.50 level!" veya "dropped to"
+    let bodyEn = message;
+    
+    // Regex ile fiyat ve yönü çıkar
+    const priceMatch = message.match(/([\d,]+\.?\d*)/);
+    const price = priceMatch ? priceMatch[1].replace(/,/g, '') : '';
+    
+    if (message.includes('ulaştı')) {
+      // "BTCUSDT fiyatı 89446.50 seviyesine ulaştı!" -> "BTCUSDT price reached 89446.50 level!"
+      bodyEn = `${upperSymbol} price reached ${price} level!`;
+    } else if (message.includes('düştü')) {
+      // "BTCUSDT fiyatı 89446.50 seviyesine düştü!" -> "BTCUSDT price dropped to 89446.50 level!"
+      bodyEn = `${upperSymbol} price dropped to ${price} level!`;
+    } else {
+      // Fallback: Basit çeviri
+      bodyEn = `${upperSymbol} price alert triggered!`;
+    }
+    
+    const titleEn = `Price Alert: ${upperSymbol}`;
+
+    // 🔥 MULTILINGUAL: Paralel gönderim
+    const promises = [];
+    
+    if (trTokens.length > 0) {
+      console.log(`🇹🇷 Sending TR alarm to ${trTokens.length} device(s)`);
+      promises.push(
+        sendAlarmNotification(trTokens, symbol, bodyTr, data, titleTr, bodyTr)
+      );
+    }
+
+    if (enTokens.length > 0) {
+      console.log(`🌍 Sending EN alarm to ${enTokens.length} device(s)`);
+      promises.push(
+        sendAlarmNotification(enTokens, symbol, bodyEn, data, titleEn, bodyEn)
+      );
+    }
+
+    // Tüm bildirimleri paralel gönder
+    const results = await Promise.all(promises);
+    const allSuccess = results.every(r => r === true);
+    const totalSent = trTokens.length + enTokens.length;
+
+    if (allSuccess) {
+      console.log(`✅ Alarm notifications sent successfully: ${totalSent} device(s)`);
+      if (trTokens.length > 0) {
+        console.log(`   🇹🇷 TR: ${trTokens.length} device(s)`);
+      }
+      if (enTokens.length > 0) {
+        console.log(`   🌍 EN: ${enTokens.length} device(s)`);
+      }
 
       res.json({ 
         success: true,
-        sent: tokens.length,
+        sent: totalSent,
         totalDevices: devices.length,
+        trSent: trTokens.length,
+        enSent: enTokens.length,
         targetDeviceInfo,
       });
     } else {

@@ -115,11 +115,38 @@ export async function sendPriceAlertNotification(tokens, symbol, currentPrice, t
 
 /**
  * Send alarm notification (unified)
+ * 🔥 MULTILINGUAL: Supports custom title/body for different languages
+ * @param {string|string[]} tokens - Device push tokens
+ * @param {string} symbol - Trading symbol (e.g., BTCUSDT)
+ * @param {string} message - Alarm message
+ * @param {object} alarmData - Additional alarm data
+ * @param {string} [customTitle] - Optional custom title (for multilingual support)
+ * @param {string} [customBody] - Optional custom body (for multilingual support)
  */
-export async function sendAlarmNotification(tokens, symbol, message, alarmData) {
+export async function sendAlarmNotification(tokens, symbol, message, alarmData, customTitle = null, customBody = null) {
   // Ensure symbol is uppercase
   const upperSymbol = symbol.toUpperCase();
   
+  // If custom title/body provided, use them (for multilingual support)
+  if (customTitle && customBody) {
+    return sendPushNotifications([{
+      to: tokens,
+      title: customTitle,
+      body: customBody,
+      data: {
+        type: 'alarm',
+        symbol: upperSymbol,
+        message: customBody, // Use translated message
+        ...alarmData,
+      },
+      sound: 'default',
+      channelId: 'alarms-v2',
+      priority: 'high',
+      icon: 'notification_icon',
+    }]);
+  }
+  
+  // Default Turkish message (backward compatibility)
   return sendPushNotifications([{
     to: tokens,
     title: `Alarm: ${upperSymbol}`,

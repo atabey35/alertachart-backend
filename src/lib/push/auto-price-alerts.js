@@ -658,6 +658,30 @@ export class AutoPriceAlertService {
         // 🔥 CRITICAL: Mark as triggered BEFORE sending notification (prevent race condition)
         this.triggeredCustomAlerts.set(triggerKey, Date.now());
         
+        // 🔥 MULTILINGUAL: Device language bilgisini al
+        const deviceLang = alert.language ? alert.language.toLowerCase() : 'tr';
+        const isTurkish = deviceLang.startsWith('tr');
+        
+        // 🔥 MULTILINGUAL: Mesajları hazırla
+        const directionEmoji = direction === 'up' ? '📈' : '📉';
+        
+        let title, body;
+        if (isTurkish) {
+          // TR Mesajı
+          const actionTextTr = direction === 'up' ? 'yaklaşıyor' : 'iniyor';
+          title = `${symbol} ${directionEmoji}`;
+          const formattedTargetTr = target_price.toLocaleString('en-US');
+          const formattedCurrentTr = currentPrice.toFixed(2);
+          body = `${symbol} ${formattedTargetTr} $ seviyesine ${actionTextTr}! Şu anki fiyat: ${formattedCurrentTr}`;
+        } else {
+          // EN Mesajı (Global)
+          const actionTextEn = direction === 'up' ? 'is approaching' : 'is dropping to';
+          title = `${symbol} ${directionEmoji}`;
+          const formattedTargetEn = target_price.toLocaleString('en-US');
+          const formattedCurrentEn = currentPrice.toFixed(2);
+          body = `${symbol} ${actionTextEn} ${formattedTargetEn} $ level! Current price: ${formattedCurrentEn}`;
+        }
+        
         // Bildirim gönder
         try {
           const success = await sendPriceAlertNotification(
@@ -665,13 +689,15 @@ export class AutoPriceAlertService {
             symbol,
             currentPrice,
             target_price,
-            direction
+            direction,
+            title,
+            body // 🔥 MULTILINGUAL: Custom title/body gönder
           );
           
           if (success) {
             // Database'i güncelle
             await updatePriceAlertNotification(id, currentPrice);
-            console.log(`✅ Custom alert triggered: ${symbol} @ ${target_price} (${direction}) for user ${alert.user_id}`);
+            console.log(`✅ Custom alert triggered: ${symbol} @ ${target_price} (${direction}) for user ${alert.user_id} [${isTurkish ? 'TR' : 'EN'}]`);
           } else {
             // If notification failed, clear trigger to allow retry
             this.triggeredCustomAlerts.delete(triggerKey);

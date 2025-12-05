@@ -450,6 +450,7 @@ export async function getAllActiveCustomAlerts() {
       pa.*, 
       d.expo_push_token, 
       d.platform,
+      d.language,
       d.user_id,
       u.plan,
       u.expiry_date,
