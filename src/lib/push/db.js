@@ -300,6 +300,7 @@ export async function getPremiumTrialDevices() {
       d.model,
       d.os_version,
       d.language,
+      u.provider AS user_provider,
       u.plan,
       u.expiry_date,
       u.trial_started_at,

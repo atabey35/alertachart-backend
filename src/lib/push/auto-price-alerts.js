@@ -439,6 +439,8 @@ export class AutoPriceAlertService {
       let enCount = 0;
       let invalidTokensSkipped = 0;
       const userEmails = new Set();
+      const normalUserEmails = new Set();
+      const guestUserEmails = new Set();
 
       // Her cihaz için token kontrolü yap ve dile göre grupla
       for (const device of devices) {
@@ -481,13 +483,18 @@ export class AutoPriceAlertService {
 
         if (device.email) {
           userEmails.add(device.email);
+          if (device.user_provider === 'guest') {
+            guestUserEmails.add(device.email);
+          } else {
+            normalUserEmails.add(device.email);
+          }
         }
       }
 
       console.log(`🔒 Premium check results:`);
       console.log(`   🇹🇷 Turkish devices: ${trCount}`);
       console.log(`   🌍 Global (non-Turkish) devices: ${enCount}`);
-      console.log(`   👥 Unique premium/trial users: ${userEmails.size}`);
+      console.log(`   👥 Unique premium/trial users: ${userEmails.size} (normal: ${normalUserEmails.size}, guest: ${guestUserEmails.size})`);
       console.log(`   🚫 Invalid tokens skipped: ${invalidTokensSkipped}`);
       
       // 🔥 DEBUG: Log sample of EN devices for troubleshooting

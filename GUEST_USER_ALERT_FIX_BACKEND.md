@@ -173,3 +173,12 @@ Artık misafir kullanıcılar da Google/Apple kullanıcıları gibi:
 - ✅ Otomatik fiyat takipleri alabilir
 
 Tüm değişiklikler geriye dönük uyumlu (backward compatible) - normal kullanıcılar için mevcut davranış korunuyor.
+
+
+
+
+
+
+
+
+
