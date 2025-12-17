@@ -59,6 +59,7 @@ export async function sendFCMNotification(token, title, body, data) {
 
 /**
  * Send FCM push notifications to multiple devices
+ * ✅ FIXED: Handles FCM batch limit (500 messages per batch)
  */
 export async function sendFCMNotifications(payloads) {
   try {
@@ -132,52 +133,93 @@ export async function sendFCMNotifications(payloads) {
       return false;
     }
 
-    // Send messages
-    const responses = await admin.messaging().sendEach(messages);
+    // ✅ FIX: FCM batch limit is 500 messages per batch
+    const FCM_BATCH_LIMIT = 500;
+    const batches = [];
     
-    console.log(`✅ Sent ${messages.length} FCM notifications`);
-    console.log(`Success: ${responses.successCount}, Failures: ${responses.failureCount}`);
+    // Split messages into batches of 500
+    for (let i = 0; i < messages.length; i += FCM_BATCH_LIMIT) {
+      batches.push(messages.slice(i, i + FCM_BATCH_LIMIT));
+    }
 
-    // Log errors and clean up invalid tokens
-    if (responses.failureCount > 0) {
-      for (let idx = 0; idx < responses.responses.length; idx++) {
-        const resp = responses.responses[idx];
-        if (!resp.success) {
-          const errorCode = resp.error?.code;
-          const errorMessage = resp.error?.message;
-          const invalidToken = messages[idx].token;
-          
-          console.error(`❌ FCM Error for message ${idx}:`, {
-            token: invalidToken.substring(0, 40) + '...',
-            code: errorCode,
-            message: errorMessage,
-          });
-          
-          // Clean up invalid tokens from database
-          if (errorCode === 'messaging/registration-token-not-registered' || 
-              errorCode === 'messaging/invalid-registration-token' ||
-              errorCode === 'messaging/invalid-argument') {
-            console.log(`🗑️  Removing invalid FCM token: ${invalidToken.substring(0, 30)}...`);
-            try {
-              await deleteDeviceByToken(invalidToken);
-              console.log(`✅ Invalid token removed from database`);
-            } catch (deleteError) {
-              console.error(`Failed to delete invalid token:`, deleteError);
-            }
-          } else {
-            // Log other error types for debugging
-            console.error(`   ⚠️  FCM error code: ${errorCode} - ${errorMessage}`);
-            if (errorCode === 'messaging/authentication-error') {
-              console.error(`   ⚠️  Firebase authentication error - check service account credentials`);
-            } else if (errorCode === 'messaging/server-unavailable') {
-              console.error(`   ⚠️  FCM server unavailable - retry may be needed`);
+    console.log(`📤 Sending ${messages.length} FCM notifications in ${batches.length} batch(es)`);
+
+    let totalSuccessCount = 0;
+    let totalFailureCount = 0;
+    const allInvalidTokens = [];
+
+    // Send each batch
+    for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
+      const batch = batches[batchIndex];
+      console.log(`📤 Sending batch ${batchIndex + 1}/${batches.length} (${batch.length} messages)...`);
+
+      try {
+        const responses = await admin.messaging().sendEach(batch);
+        
+        totalSuccessCount += responses.successCount;
+        totalFailureCount += responses.failureCount;
+
+        console.log(`✅ Batch ${batchIndex + 1}/${batches.length}: Success: ${responses.successCount}, Failures: ${responses.failureCount}`);
+
+        // Log errors and collect invalid tokens
+        if (responses.failureCount > 0) {
+          for (let idx = 0; idx < responses.responses.length; idx++) {
+            const resp = responses.responses[idx];
+            if (!resp.success) {
+              const errorCode = resp.error?.code;
+              const errorMessage = resp.error?.message;
+              const invalidToken = batch[idx].token;
+              
+              console.error(`❌ FCM Error in batch ${batchIndex + 1}, message ${idx}:`, {
+                token: invalidToken.substring(0, 40) + '...',
+                code: errorCode,
+                message: errorMessage,
+              });
+              
+              // Collect invalid tokens for cleanup
+              if (errorCode === 'messaging/registration-token-not-registered' || 
+                  errorCode === 'messaging/invalid-registration-token' ||
+                  errorCode === 'messaging/invalid-argument') {
+                allInvalidTokens.push(invalidToken);
+              } else {
+                // Log other error types for debugging
+                console.error(`   ⚠️  FCM error code: ${errorCode} - ${errorMessage}`);
+                if (errorCode === 'messaging/authentication-error') {
+                  console.error(`   ⚠️  Firebase authentication error - check service account credentials`);
+                } else if (errorCode === 'messaging/server-unavailable') {
+                  console.error(`   ⚠️  FCM server unavailable - retry may be needed`);
+                }
+              }
             }
           }
+        }
+
+        // Small delay between batches to avoid rate limiting
+        if (batchIndex < batches.length - 1) {
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
+      } catch (batchError) {
+        console.error(`❌ Failed to send batch ${batchIndex + 1}/${batches.length}:`, batchError);
+        totalFailureCount += batch.length;
+      }
+    }
+
+    // Clean up invalid tokens from database
+    if (allInvalidTokens.length > 0) {
+      console.log(`🗑️  Removing ${allInvalidTokens.length} invalid FCM token(s) from database...`);
+      for (const invalidToken of allInvalidTokens) {
+        try {
+          await deleteDeviceByToken(invalidToken);
+          console.log(`✅ Invalid token removed: ${invalidToken.substring(0, 30)}...`);
+        } catch (deleteError) {
+          console.error(`Failed to delete invalid token:`, deleteError);
         }
       }
     }
 
-    return responses.failureCount === 0;
+    console.log(`✅ FCM notifications complete: ${totalSuccessCount} sent, ${totalFailureCount} failed (total: ${messages.length})`);
+
+    return totalFailureCount === 0;
   } catch (error) {
     console.error('Failed to send FCM notifications:', error);
     return false;
