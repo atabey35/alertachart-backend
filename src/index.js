@@ -18,6 +18,7 @@ import devicesRouter from './routes/devices.js';
 import { getAutoPriceAlertService } from './lib/push/auto-price-alerts.js';
 import { getPercentageAlertService } from './lib/push/percentage-alerts.js';
 import { getVolumeAlertService } from './lib/push/volume-alerts.js';
+import { getScheduledSummaryService } from './lib/push/scheduled-summary.js';
 import { initPushDatabase } from './lib/push/db.js';
 import { initAuthDatabase } from './lib/auth/db.js';
 
@@ -148,6 +149,9 @@ app.listen(PORT, async () => {
 
   const volumeService = getVolumeAlertService();
   volumeService.start();
+
+  const scheduledSummaryService = getScheduledSummaryService();
+  scheduledSummaryService.start();
 
   console.log('');
   console.log('✅ All services running!');

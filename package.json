@@ -28,6 +28,7 @@
     "google-auth-library": "^10.5.0",
     "jsonwebtoken": "^9.0.2",
     "node-cache": "^5.1.2",
+    "node-cron": "^4.2.1",
     "node-fetch": "^3.3.2",
     "postgres": "^3.4.7",
     "ws": "^8.18.3"

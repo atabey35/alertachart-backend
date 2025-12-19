@@ -14,6 +14,7 @@ import { optionalAuth } from '../lib/auth/middleware.js';
 import { getAutoPriceAlertService } from '../lib/push/auto-price-alerts.js';
 import { getPercentageAlertService } from '../lib/push/percentage-alerts.js';
 import { getVolumeAlertService } from '../lib/push/volume-alerts.js';
+import { getScheduledSummaryService } from '../lib/push/scheduled-summary.js';
 
 const router = express.Router();
 
@@ -187,6 +188,7 @@ router.get('/services/status', async (req, res) => {
     const autoPriceService = getAutoPriceAlertService();
     const percentageService = getPercentageAlertService();
     const volumeService = getVolumeAlertService();
+    const scheduledSummaryService = getScheduledSummaryService();
 
     res.json({
       success: true,
@@ -203,6 +205,10 @@ router.get('/services/status', async (req, res) => {
           isRunning: volumeService.isRunning,
           status: volumeService.getStatus(),
         },
+        scheduledSummary: {
+          isRunning: scheduledSummaryService.isRunning,
+          status: scheduledSummaryService.getStatus(),
+        },
       },
       timestamp: Date.now(),
     });
@@ -210,6 +216,44 @@ router.get('/services/status', async (req, res) => {
     console.error('Error getting services status:', error);
     res.status(500).json({
       error: error.message || 'Failed to get services status'
+    });
+  }
+});
+
+/**
+ * POST /api/push/summary/trigger
+ * Manually trigger a summary notification (for testing)
+ */
+router.post('/summary/trigger', async (req, res) => {
+  try {
+    const { timeOfDay = 'morning' } = req.body;
+
+    if (!['morning', 'evening'].includes(timeOfDay)) {
+      return res.status(400).json({
+        error: 'Invalid timeOfDay. Must be "morning" or "evening"'
+      });
+    }
+
+    const scheduledSummaryService = getScheduledSummaryService();
+
+    if (!scheduledSummaryService.isRunning) {
+      return res.status(400).json({
+        error: 'Scheduled summary service is not running'
+      });
+    }
+
+    // Trigger summary in background
+    scheduledSummaryService.sendManualSummary(timeOfDay);
+
+    res.json({
+      success: true,
+      message: `${timeOfDay} summary triggered`,
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    console.error('Error triggering summary:', error);
+    res.status(500).json({
+      error: error.message || 'Failed to trigger summary'
     });
   }
 });
