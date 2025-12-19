@@ -3,14 +3,17 @@
  */
 
 import express from 'express';
-import { 
-  initPushDatabase, 
-  upsertDevice, 
-  getDevice, 
-  deactivateDevice 
+import {
+  initPushDatabase,
+  upsertDevice,
+  getDevice,
+  deactivateDevice
 } from '../lib/push/db.js';
 import { sendTestNotification } from '../lib/push/unified-push.js';
 import { optionalAuth } from '../lib/auth/middleware.js';
+import { getAutoPriceAlertService } from '../lib/push/auto-price-alerts.js';
+import { getPercentageAlertService } from '../lib/push/percentage-alerts.js';
+import { getVolumeAlertService } from '../lib/push/volume-alerts.js';
 
 const router = express.Router();
 
@@ -42,7 +45,7 @@ router.post('/register', optionalAuth, async (req, res) => {
 
     // Get userId from authenticated user (if available)
     const userId = req.user?.userId || null;
-    
+
     // 🔥 DEBUG: Log authentication status
     if (userId) {
       console.log(`[Push Register] ✅ User authenticated: ${userId} (${req.user?.email || 'no email'})`);
@@ -122,13 +125,13 @@ router.post('/test', async (req, res) => {
 
     // If deviceId provided, get token from database
     if (deviceId && !token) {
-    const device = await getDevice(deviceId);
+      const device = await getDevice(deviceId);
 
-    if (!device) {
-      return res.status(404).json({
-        error: 'Device not found or inactive'
-      });
-    }
+      if (!device) {
+        return res.status(404).json({
+          error: 'Device not found or inactive'
+        });
+      }
 
       pushToken = device.expo_push_token;
     }
@@ -138,7 +141,7 @@ router.post('/test', async (req, res) => {
     }
 
     console.log(`[Test Push] Sending to token: ${pushToken.substring(0, 30)}...`);
-    
+
     // 🔥 MULTILINGUAL: Get device language for test notification
     let customTitle = null;
     let customBody = null;
@@ -153,12 +156,12 @@ router.post('/test', async (req, res) => {
         }
       }
     }
-    
+
     const success = await sendTestNotification(pushToken, customTitle, customBody);
 
     if (success) {
       console.log(`✅ Test notification sent successfully`);
-      res.json({ 
+      res.json({
         success: true,
         tokenType: pushToken.startsWith('ExponentPushToken') || pushToken.startsWith('ExpoPushToken') ? 'expo' : 'fcm'
       });
@@ -171,6 +174,42 @@ router.post('/test', async (req, res) => {
     console.error('Error sending test push:', error);
     res.status(500).json({
       error: error.message || 'Failed to send test notification'
+    });
+  }
+});
+
+/**
+ * GET /api/push/services/status
+ * Get status of all alert services
+ */
+router.get('/services/status', async (req, res) => {
+  try {
+    const autoPriceService = getAutoPriceAlertService();
+    const percentageService = getPercentageAlertService();
+    const volumeService = getVolumeAlertService();
+
+    res.json({
+      success: true,
+      services: {
+        autoPriceAlerts: {
+          isRunning: autoPriceService.isRunning,
+          status: autoPriceService.getStatus(),
+        },
+        percentageAlerts: {
+          isRunning: percentageService.isRunning,
+          status: percentageService.getStatus(),
+        },
+        volumeAlerts: {
+          isRunning: volumeService.isRunning,
+          status: volumeService.getStatus(),
+        },
+      },
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    console.error('Error getting services status:', error);
+    res.status(500).json({
+      error: error.message || 'Failed to get services status'
     });
   }
 });

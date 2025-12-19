@@ -16,6 +16,8 @@ import adminRouter from './routes/admin.js';
 import authRouter from './routes/auth.js';
 import devicesRouter from './routes/devices.js';
 import { getAutoPriceAlertService } from './lib/push/auto-price-alerts.js';
+import { getPercentageAlertService } from './lib/push/percentage-alerts.js';
+import { getVolumeAlertService } from './lib/push/volume-alerts.js';
 import { initPushDatabase } from './lib/push/db.js';
 import { initAuthDatabase } from './lib/auth/db.js';
 
@@ -25,7 +27,7 @@ const app = express();
 const PORT = process.env.PORT || 3002;
 
 // CORS configuration
-const allowedOrigins = process.env.ALLOWED_ORIGINS 
+const allowedOrigins = process.env.ALLOWED_ORIGINS
   ? process.env.ALLOWED_ORIGINS.split(',')
   : ['http://localhost:3000'];
 
@@ -33,12 +35,12 @@ app.use(cors({
   origin: (origin, callback) => {
     // Allow requests with no origin (mobile apps, Postman, etc.)
     if (!origin) return callback(null, true);
-    
+
     // Allow alertachart.com and aggr.alertachart.com
-    if (allowedOrigins.includes(origin) || 
-        origin.endsWith('.vercel.app') ||
-        origin === 'https://alertachart.com' ||
-        origin === 'https://aggr.alertachart.com') {
+    if (allowedOrigins.includes(origin) ||
+      origin.endsWith('.vercel.app') ||
+      origin === 'https://alertachart.com' ||
+      origin === 'https://aggr.alertachart.com') {
       callback(null, true);
     } else {
       callback(new Error('Not allowed by CORS'));
@@ -52,8 +54,8 @@ app.use(express.json());
 
 // Health check
 app.get('/health', (req, res) => {
-  res.json({ 
-    status: 'ok', 
+  res.json({
+    status: 'ok',
     uptime: process.uptime(),
     timestamp: Date.now(),
     service: 'alerta-chart-backend'
@@ -73,7 +75,7 @@ app.use('/api/devices', devicesRouter);
 // Error handler
 app.use((err, req, res, next) => {
   console.error('[Error]', err);
-  res.status(500).json({ 
+  res.status(500).json({
     error: err.message || 'Internal server error',
     timestamp: Date.now()
   });
@@ -105,24 +107,24 @@ app.listen(PORT, async () => {
   console.log(`🌍 CORS enabled for: ${allowedOrigins.join(', ')}`);
   console.log(`🔍 Node.js version: ${process.version}`);
   console.log(`🔍 Process PID: ${process.pid}`);
-  
+
   // Initialize databases
   console.log('');
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
   console.log('🗄️  Initializing databases...');
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-  
+
   try {
     console.log('🔍 Starting database initialization...');
     console.log('🔍 DATABASE_URL exists:', !!process.env.DATABASE_URL);
     console.log('🔍 DATABASE_URL length:', process.env.DATABASE_URL ? process.env.DATABASE_URL.length : 0);
-    
+
     await initPushDatabase();
     console.log('✅ Push database initialized');
-    
+
     await initAuthDatabase();
     console.log('✅ Auth database initialized');
-    
+
     console.log('✅ All databases initialized successfully');
   } catch (error) {
     console.error('❌ Failed to initialize databases:', error);
@@ -131,16 +133,22 @@ app.listen(PORT, async () => {
     console.error('❌ Error stack:', error.stack);
     process.exit(1);
   }
-  
+
   // Start auto price alert service
   console.log('');
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-  console.log('🔔 Starting Auto Price Alert Service...');
+  console.log('🔔 Starting Alert Services...');
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-  
+
   const autoPriceService = getAutoPriceAlertService();
   autoPriceService.start();
-  
+
+  const percentageService = getPercentageAlertService();
+  percentageService.start();
+
+  const volumeService = getVolumeAlertService();
+  volumeService.start();
+
   console.log('');
   console.log('✅ All services running!');
 });
