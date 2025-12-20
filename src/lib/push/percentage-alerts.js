@@ -527,8 +527,17 @@ export class PercentageAlertService {
                 const isTurkish = lang.startsWith('tr');
 
                 const directionEmoji = direction === 'up' ? '📈' : '📉';
-                const formattedCurrent = currentPrice.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-                const formattedOld = oldestPrice.price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+                // Dynamic precision for low-value coins (e.g., 0.007889 should show as 0.007889, not 0.01)
+                const getPrecision = (price) => {
+                    if (price >= 100) return 2;
+                    if (price >= 1) return 4;
+                    if (price >= 0.01) return 6;
+                    return 8; // Very low value coins
+                };
+                const precision = Math.max(getPrecision(currentPrice), getPrecision(oldestPrice.price));
+                const formattedCurrent = currentPrice.toLocaleString('en-US', { minimumFractionDigits: precision, maximumFractionDigits: precision });
+                const formattedOld = oldestPrice.price.toLocaleString('en-US', { minimumFractionDigits: precision, maximumFractionDigits: precision });
                 const timeframeLabel = timeframe_minutes == 60 ? '1h' : timeframe_minutes == 240 ? '4h' : '24h';
 
                 let title, body;
