@@ -4,8 +4,8 @@
  */
 
 import WebSocket from 'ws';
-import { getPremiumTrialDevices } from './db.js';
-import { sendPriceAlertNotification } from './unified-push.js';
+import { getPremiumTrialDevices, getCustomAlertsByType, updateCustomAlertNotification } from './db.js';
+import { sendPriceAlertNotification, sendPushNotifications } from './unified-push.js';
 
 /**
  * Hacim patlaması takip servisi
@@ -65,6 +65,10 @@ export class VolumeAlertService {
                 baselineVolume: null, // Hesaplanan ortalama hacim
             });
         });
+
+        // Custom alert'ler için cache
+        this.customAlertsCache = new Map(); // symbol -> [alerts]
+        this.customAlertsCheckInterval = null;
     }
 
     /**
@@ -89,11 +93,22 @@ export class VolumeAlertService {
             this.connectToSymbol(symbol);
         });
 
+        // Custom alert'leri yükle
+        this.loadCustomAlerts();
+
+        // Her 30 saniyede custom alert'leri yeniden yükle
+        this.customAlertsCheckInterval = setInterval(() => {
+            if (this.isRunning) {
+                this.loadCustomAlerts();
+            }
+        }, 30000);
+
         // Periyodik hacim kontrolü
         this.checkInterval = setInterval(() => {
             if (this.isRunning) {
                 this.recordVolumes();
                 this.checkVolumeSpikes();
+                this.checkCustomVolumeAlerts();
             }
         }, this.CHECK_INTERVAL);
     }
@@ -111,12 +126,18 @@ export class VolumeAlertService {
             this.checkInterval = null;
         }
 
+        if (this.customAlertsCheckInterval) {
+            clearInterval(this.customAlertsCheckInterval);
+            this.customAlertsCheckInterval = null;
+        }
+
         this.wsConnections.forEach((ws) => {
             if (ws.readyState === WebSocket.OPEN) {
                 ws.close();
             }
         });
         this.wsConnections.clear();
+        this.customAlertsCache.clear();
 
         console.log('🛑 Volume alert service stopped');
     }
@@ -396,7 +417,127 @@ export class VolumeAlertService {
             };
         });
 
+        status.customAlertsCount = Array.from(this.customAlertsCache.values()).reduce((sum, arr) => sum + arr.length, 0);
+
         return status;
+    }
+
+    /**
+     * Custom volume alert'leri yükle
+     */
+    async loadCustomAlerts() {
+        try {
+            const alerts = await getCustomAlertsByType('volume_spike');
+
+            // Symbol bazında grupla
+            const alertsBySymbol = new Map();
+            alerts.forEach(alert => {
+                const symbol = alert.symbol.toUpperCase();
+                if (!alertsBySymbol.has(symbol)) {
+                    alertsBySymbol.set(symbol, []);
+                }
+                alertsBySymbol.get(symbol).push(alert);
+            });
+
+            // Cache'i güncelle
+            this.customAlertsCache = alertsBySymbol;
+
+            // Yeni symbol'ler için WebSocket bağlantısı kur
+            alertsBySymbol.forEach((alerts, symbol) => {
+                if (!this.wsConnections.has(symbol)) {
+                    console.log(`🔔 [VolumeAlerts] Connecting to custom symbol: ${symbol}`);
+                    this.connectToSymbol(symbol);
+
+                    // History yapısını başlat
+                    if (!this.volumeHistory.has(symbol)) {
+                        this.volumeHistory.set(symbol, {
+                            records: [],
+                            baselineVolume: null,
+                        });
+                    }
+                }
+            });
+
+            const customCount = alerts.length;
+            if (customCount > 0) {
+                console.log(`📊 [VolumeAlerts] Loaded ${customCount} custom volume alert(s)`);
+            }
+        } catch (error) {
+            console.error('[VolumeAlerts] Error loading custom alerts:', error);
+        }
+    }
+
+    /**
+     * Custom volume alert'leri kontrol et
+     */
+    async checkCustomVolumeAlerts() {
+        for (const [symbol, alerts] of this.customAlertsCache) {
+            const currentVolume = this.volumeCache.get(symbol);
+            const currentPrice = this.priceCache.get(symbol);
+            const history = this.volumeHistory.get(symbol);
+
+            if (!currentVolume || !currentPrice || !history || !history.baselineVolume) continue;
+
+            const spikeRatio = currentVolume / history.baselineVolume;
+
+            for (const alert of alerts) {
+                const { id, spike_multiplier, last_notified_at, cooldown_minutes, expo_push_token, language } = alert;
+
+                // Cooldown kontrolü
+                if (last_notified_at) {
+                    const cooldownMs = (cooldown_minutes || 60) * 60 * 1000;
+                    const timeSince = Date.now() - new Date(last_notified_at).getTime();
+                    if (timeSince < cooldownMs) continue;
+                }
+
+                // Spike kontrolü
+                if (spikeRatio >= parseFloat(spike_multiplier)) {
+                    // Token kontrolü
+                    if (!expo_push_token || expo_push_token.length <= 10) continue;
+
+                    const lowerToken = expo_push_token.toLowerCase();
+                    if (lowerToken.includes('test') || lowerToken === 'unknown') continue;
+
+                    // Bildirim gönder
+                    const lang = language ? language.toLowerCase() : 'tr';
+                    const isTurkish = lang.startsWith('tr');
+
+                    const formattedCurrent = this.formatVolume(currentVolume);
+                    const formattedBaseline = this.formatVolume(history.baselineVolume);
+                    const formattedPrice = currentPrice.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+                    let title, body;
+                    if (isTurkish) {
+                        title = `🔥 ${symbol} Hacim Patlaması!`;
+                        body = `${spike_multiplier}x normal hacim! (${formattedBaseline} → ${formattedCurrent}) | Fiyat: $${formattedPrice}`;
+                    } else {
+                        title = `🔥 ${symbol} Volume Spike!`;
+                        body = `${spike_multiplier}x normal volume! (${formattedBaseline} → ${formattedCurrent}) | Price: $${formattedPrice}`;
+                    }
+
+                    try {
+                        await sendPushNotifications([{
+                            to: [expo_push_token],
+                            title: title,
+                            body: body,
+                            data: {
+                                type: 'custom_volume_spike',
+                                symbol: symbol,
+                                spikeMultiplier: spike_multiplier.toString(),
+                            },
+                            sound: 'default',
+                            channelId: 'volume-alerts',
+                            priority: 'high',
+                        }]);
+
+                        await updateCustomAlertNotification(id, spikeRatio);
+                        console.log(`✅ [VolumeAlerts] Custom alert triggered: ${symbol} ${spike_multiplier}x [${isTurkish ? 'TR' : 'EN'}]`);
+                    } catch (error) {
+                        console.error('[VolumeAlerts] Error sending custom alert:', error);
+                    }
+                }
+            }
+        }
     }
 }
 

@@ -7,6 +7,9 @@ import {
   createPriceAlert,
   getPriceAlerts,
   deletePriceAlert,
+  createCustomAlert,
+  getCustomAlerts,
+  deleteCustomAlert,
 } from '../lib/push/db.js';
 import { authenticateToken, optionalAuth } from '../lib/auth/middleware.js';
 import { getUserById, getSessionByRefreshToken, getUserByEmail, getSql as getAuthSql } from '../lib/auth/db.js';
@@ -19,25 +22,25 @@ const router = express.Router();
  */
 async function checkPremiumAccess(userId) {
   if (!userId) return false;
-  
+
   const user = await getUserById(userId);
   if (!user) return false;
-  
+
   // Premium users (with or without expiry)
   if (user.plan === 'premium') {
     if (!user.expiry_date) return true; // Lifetime premium
     return new Date(user.expiry_date) > new Date();
   }
-  
+
   // Trial users (active trial)
   if (user.plan === 'free' && user.trial_started_at) {
-    const trialEnd = user.trial_ended_at 
+    const trialEnd = user.trial_ended_at
       ? new Date(user.trial_ended_at)
       : new Date(new Date(user.trial_started_at).getTime() + 3 * 24 * 60 * 60 * 1000); // 3 days
-    
+
     return new Date() < trialEnd;
   }
-  
+
   return false;
 }
 
@@ -74,17 +77,17 @@ router.post('/price', optionalAuth, async (req, res) => {
 
     // Premium check - if no user, try to refresh token
     let userId = req.user?.userId;
-    
+
     // 🔥 CRITICAL: For guest users, if no userId from cookie/token, try to find user by device_id and userEmail
     if (!userId && userEmail) {
       console.log('[Alerts POST] 🔓 Guest user detected, trying to find user:', {
         userEmail,
         deviceId: deviceId ? deviceId.substring(0, 20) + '...' : 'not provided',
       });
-      
+
       try {
         const sql = getAuthSql();
-        
+
         // First try: device_id + email (most specific)
         let guestUsers = [];
         if (deviceId) {
@@ -97,7 +100,7 @@ router.post('/price', optionalAuth, async (req, res) => {
             LIMIT 1
           `;
         }
-        
+
         // Fallback: Only email (guest users have unique emails)
         if (guestUsers.length === 0) {
           console.log('[Alerts POST] ⚠️ Guest user not found by device_id and email, trying email only...');
@@ -109,7 +112,7 @@ router.post('/price', optionalAuth, async (req, res) => {
             LIMIT 1
           `;
         }
-        
+
         if (guestUsers.length > 0) {
           userId = guestUsers[0].id;
           console.log('[Alerts POST] ✅ Guest user found:', {
@@ -126,13 +129,13 @@ router.post('/price', optionalAuth, async (req, res) => {
         console.error('[Alerts POST] ❌ Error finding guest user:', guestError);
       }
     }
-    
+
     // 🔥 CRITICAL: Also check cookie header (for subdomain/cross-origin requests)
     const cookieHeader = req.headers.cookie || '';
     const hasRefreshTokenInHeader = cookieHeader.includes('refreshToken=');
     const hasRefreshTokenInCookies = !!req.cookies?.refreshToken;
     const refreshToken = req.cookies?.refreshToken || (cookieHeader.match(/refreshToken=([^;]+)/)?.[1]);
-    
+
     console.log('[Alerts POST] Checking token refresh:', {
       hasUserId: !!userId,
       hasRefreshTokenInCookies,
@@ -141,26 +144,26 @@ router.post('/price', optionalAuth, async (req, res) => {
       refreshTokenValue: refreshToken ? `${refreshToken.substring(0, 20)}...` : 'none',
       cookieHeaderLength: cookieHeader.length,
     });
-    
+
     if (!userId && refreshToken) {
       console.log('[Alerts POST] 🔄 Attempting token refresh...');
       console.log('[Alerts POST] Refresh token (first 50 chars):', refreshToken.substring(0, 50));
-      
+
       // Try to refresh access token from refresh token
       try {
         console.log('[Alerts POST] Verifying refresh token...');
         const decoded = verifyRefreshToken(refreshToken);
         console.log('[Alerts POST] Refresh token verified, decoded:', { userId: decoded.userId, email: decoded.email });
-        
+
         console.log('[Alerts POST] Getting session from database...');
         const session = await getSessionByRefreshToken(refreshToken);
-        console.log('[Alerts POST] Session result:', session ? { 
-          userId: session.user_id, 
+        console.log('[Alerts POST] Session result:', session ? {
+          userId: session.user_id,
           email: session.email,
           expiresAt: session.expires_at,
           isExpired: session.expires_at ? new Date(session.expires_at) < new Date() : 'unknown'
         } : 'null');
-        
+
         if (session) {
           // Check if session is expired
           if (session.expires_at && new Date(session.expires_at) < new Date()) {
@@ -170,7 +173,7 @@ router.post('/price', optionalAuth, async (req, res) => {
             // Generate new access token
             const accessToken = generateAccessToken(session.user_id, session.email);
             console.log('[Alerts POST] Generated new access token');
-            
+
             // Set accessToken cookie
             res.cookie('accessToken', accessToken, {
               httpOnly: true,
@@ -179,7 +182,7 @@ router.post('/price', optionalAuth, async (req, res) => {
               path: '/',
               maxAge: 15 * 60 * 1000, // 15 minutes
             });
-            
+
             userId = session.user_id;
             req.user = { userId: session.user_id, email: session.email }; // Update req.user for consistency
             console.log('[Alerts POST] ✅ Token refreshed successfully, userId:', userId);
@@ -200,7 +203,7 @@ router.post('/price', optionalAuth, async (req, res) => {
       console.log('[Alerts POST] ⚠️ No userId and no refreshToken available');
       console.log('[Alerts POST] User needs to login to create custom alerts');
     }
-    
+
     if (!userId) {
       console.log('[Alerts POST] ❌ No userId found');
       console.log('[Alerts POST] req.user:', req.user);
@@ -254,7 +257,7 @@ router.get('/price', optionalAuth, async (req, res) => {
 
     // Premium check
     let userId = req.user?.userId;
-    
+
     // 🔥 CRITICAL: For guest users, if no userId from cookie/token, try to find user by device_id
     // Also check query param for userEmail as fallback
     if (!userId && deviceId) {
@@ -263,11 +266,11 @@ router.get('/price', optionalAuth, async (req, res) => {
         deviceId: deviceId.substring(0, 20) + '...',
         userEmail: userEmail || 'not provided',
       });
-      
+
       try {
         const sql = getAuthSql();
         let guestUsers = [];
-        
+
         // First try: device_id only
         guestUsers = await sql`
           SELECT id, email, plan, expiry_date, trial_started_at, trial_ended_at, device_id
@@ -276,7 +279,7 @@ router.get('/price', optionalAuth, async (req, res) => {
           AND provider = 'guest'
           LIMIT 1
         `;
-        
+
         // Fallback: email if provided
         if (guestUsers.length === 0 && userEmail) {
           console.log('[Alerts GET] ⚠️ Guest user not found by device_id, trying email...');
@@ -288,7 +291,7 @@ router.get('/price', optionalAuth, async (req, res) => {
             LIMIT 1
           `;
         }
-        
+
         if (guestUsers.length > 0) {
           userId = guestUsers[0].id;
           console.log('[Alerts GET] ✅ Guest user found:', {
@@ -305,7 +308,7 @@ router.get('/price', optionalAuth, async (req, res) => {
         console.error('[Alerts GET] ❌ Error finding guest user:', guestError);
       }
     }
-    
+
     if (!userId) {
       return res.status(401).json({
         error: 'Authentication required'
@@ -362,7 +365,7 @@ router.delete('/price', optionalAuth, async (req, res) => {
     // Verify alert belongs to user
     const alerts = await getPriceAlerts(deviceId, userId);
     const alert = alerts.find(a => a.id === parseInt(id));
-    
+
     if (!alert) {
       return res.status(404).json({
         error: 'Alert not found or access denied'
@@ -377,6 +380,209 @@ router.delete('/price', optionalAuth, async (req, res) => {
     res.status(500).json({
       error: error.message || 'Failed to delete price alert'
     });
+  }
+});
+
+/**
+ * POST /api/alerts/volume
+ * Create volume spike alert (PREMIUM ONLY)
+ */
+router.post('/volume', optionalAuth, async (req, res) => {
+  try {
+    const { deviceId, symbol, spikeMultiplier, userEmail } = req.body;
+
+    // Validation
+    if (!deviceId || !symbol || !spikeMultiplier) {
+      return res.status(400).json({
+        error: 'Missing required fields: deviceId, symbol, spikeMultiplier'
+      });
+    }
+
+    if (![1.5, 2, 3, 5].includes(parseFloat(spikeMultiplier))) {
+      return res.status(400).json({
+        error: 'Invalid spikeMultiplier. Must be 1.5, 2, 3, or 5'
+      });
+    }
+
+    // Get userId (similar to price alerts)
+    let userId = req.user?.userId;
+
+    if (!userId && userEmail) {
+      const sql = getAuthSql();
+      const guestUsers = await sql`
+        SELECT id FROM users WHERE email = ${userEmail} AND provider = 'guest' LIMIT 1
+      `;
+      if (guestUsers.length > 0) {
+        userId = guestUsers[0].id;
+      }
+    }
+
+    if (!userId) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+
+    const hasPremium = await checkPremiumAccess(userId);
+    if (!hasPremium) {
+      return res.status(403).json({
+        error: 'Premium subscription required for custom alerts'
+      });
+    }
+
+    const alert = await createCustomAlert(deviceId, userId, symbol, 'volume_spike', {
+      spikeMultiplier: parseFloat(spikeMultiplier),
+      cooldownMinutes: 60,
+    });
+
+    console.log(`✅ Volume spike alert created: ${symbol} ${spikeMultiplier}x for user ${userId}`);
+
+    res.json({ success: true, alert });
+  } catch (error) {
+    console.error('Error creating volume alert:', error);
+    res.status(500).json({ error: error.message || 'Failed to create volume alert' });
+  }
+});
+
+/**
+ * POST /api/alerts/percentage
+ * Create percentage change alert (PREMIUM ONLY)
+ */
+router.post('/percentage', optionalAuth, async (req, res) => {
+  try {
+    const { deviceId, symbol, threshold, timeframe, direction = 'both', userEmail } = req.body;
+
+    // Validation
+    if (!deviceId || !symbol || !threshold || !timeframe) {
+      return res.status(400).json({
+        error: 'Missing required fields: deviceId, symbol, threshold, timeframe'
+      });
+    }
+
+    if (parseFloat(threshold) < 1 || parseFloat(threshold) > 50) {
+      return res.status(400).json({
+        error: 'Invalid threshold. Must be between 1 and 50 (%)'
+      });
+    }
+
+    if (![60, 240, 1440].includes(parseInt(timeframe))) {
+      return res.status(400).json({
+        error: 'Invalid timeframe. Must be 60 (1h), 240 (4h), or 1440 (24h)'
+      });
+    }
+
+    if (!['up', 'down', 'both'].includes(direction)) {
+      return res.status(400).json({
+        error: 'Invalid direction. Must be "up", "down", or "both"'
+      });
+    }
+
+    // Get userId
+    let userId = req.user?.userId;
+
+    if (!userId && userEmail) {
+      const sql = getAuthSql();
+      const guestUsers = await sql`
+        SELECT id FROM users WHERE email = ${userEmail} AND provider = 'guest' LIMIT 1
+      `;
+      if (guestUsers.length > 0) {
+        userId = guestUsers[0].id;
+      }
+    }
+
+    if (!userId) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+
+    const hasPremium = await checkPremiumAccess(userId);
+    if (!hasPremium) {
+      return res.status(403).json({
+        error: 'Premium subscription required for custom alerts'
+      });
+    }
+
+    const alert = await createCustomAlert(deviceId, userId, symbol, 'percentage_change', {
+      percentageThreshold: parseFloat(threshold),
+      timeframeMinutes: parseInt(timeframe),
+      direction: direction,
+      cooldownMinutes: 30,
+    });
+
+    console.log(`✅ Percentage alert created: ${symbol} ${threshold}% (${timeframe}min) for user ${userId}`);
+
+    res.json({ success: true, alert });
+  } catch (error) {
+    console.error('Error creating percentage alert:', error);
+    res.status(500).json({ error: error.message || 'Failed to create percentage alert' });
+  }
+});
+
+/**
+ * GET /api/alerts/custom?deviceId=xxx
+ * Get all custom alerts for device (PREMIUM ONLY)
+ */
+router.get('/custom', optionalAuth, async (req, res) => {
+  try {
+    const { deviceId } = req.query;
+
+    if (!deviceId) {
+      return res.status(400).json({ error: 'Missing deviceId' });
+    }
+
+    let userId = req.user?.userId;
+
+    if (!userId) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+
+    const hasPremium = await checkPremiumAccess(userId);
+    if (!hasPremium) {
+      return res.status(403).json({ error: 'Premium subscription required' });
+    }
+
+    const alerts = await getCustomAlerts(deviceId, userId);
+
+    res.json({ alerts });
+  } catch (error) {
+    console.error('Error fetching custom alerts:', error);
+    res.status(500).json({ error: error.message || 'Failed to fetch custom alerts' });
+  }
+});
+
+/**
+ * DELETE /api/alerts/custom
+ * Delete custom alert (PREMIUM ONLY)
+ */
+router.delete('/custom', optionalAuth, async (req, res) => {
+  try {
+    const { id, deviceId } = req.body;
+
+    if (!id || !deviceId) {
+      return res.status(400).json({ error: 'Missing id or deviceId' });
+    }
+
+    const userId = req.user?.userId;
+    if (!userId) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+
+    const hasPremium = await checkPremiumAccess(userId);
+    if (!hasPremium) {
+      return res.status(403).json({ error: 'Premium subscription required' });
+    }
+
+    // Verify alert belongs to user
+    const alerts = await getCustomAlerts(deviceId, userId);
+    const alert = alerts.find(a => a.id === parseInt(id));
+
+    if (!alert) {
+      return res.status(404).json({ error: 'Alert not found or access denied' });
+    }
+
+    await deleteCustomAlert(parseInt(id), deviceId);
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error deleting custom alert:', error);
+    res.status(500).json({ error: error.message || 'Failed to delete custom alert' });
   }
 });
 

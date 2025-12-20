@@ -43,7 +43,7 @@ export async function initPushDatabase() {
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `;
-    
+
     // Add new columns if they don't exist (migration)
     try {
       await sql`ALTER TABLE devices ADD COLUMN IF NOT EXISTS user_id INTEGER`;
@@ -67,7 +67,7 @@ export async function initPushDatabase() {
         WHERE table_name = 'devices' 
           AND column_name = 'expo_push_token'
       `;
-      
+
       if (constraintCheck.length > 0 && constraintCheck[0].is_nullable === 'NO') {
         console.log('🔄 Making expo_push_token nullable...');
         await sql`ALTER TABLE devices ALTER COLUMN expo_push_token DROP NOT NULL`;
@@ -101,7 +101,7 @@ export async function initPushDatabase() {
         FOREIGN KEY (device_id) REFERENCES devices(device_id) ON DELETE CASCADE
       )
     `;
-    
+
     // Add user_id column if it doesn't exist (migration)
     try {
       await sql`ALTER TABLE price_alerts ADD COLUMN IF NOT EXISTS user_id INTEGER`;
@@ -140,6 +140,30 @@ export async function initPushDatabase() {
       )
     `;
 
+    // Custom alerts table (volume spike and percentage change)
+    await sql`
+      CREATE TABLE IF NOT EXISTS custom_alerts (
+        id SERIAL PRIMARY KEY,
+        device_id VARCHAR(255) NOT NULL,
+        user_id INTEGER,
+        symbol VARCHAR(50) NOT NULL,
+        alert_type VARCHAR(20) NOT NULL CHECK (alert_type IN ('volume_spike', 'percentage_change')),
+        
+        spike_multiplier DECIMAL(5, 2),
+        percentage_threshold DECIMAL(5, 2),
+        timeframe_minutes INTEGER,
+        direction VARCHAR(10) CHECK (direction IN ('up', 'down', 'both')),
+        
+        is_active BOOLEAN DEFAULT true,
+        last_notified_at TIMESTAMP,
+        last_value DECIMAL(20, 8),
+        cooldown_minutes INTEGER DEFAULT 30,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (device_id) REFERENCES devices(device_id) ON DELETE CASCADE
+      )
+    `;
+
     // Indexes
     await sql`CREATE INDEX IF NOT EXISTS idx_devices_device_id ON devices(device_id)`;
     await sql`CREATE INDEX IF NOT EXISTS idx_devices_active ON devices(is_active)`;
@@ -150,6 +174,10 @@ export async function initPushDatabase() {
     await sql`CREATE INDEX IF NOT EXISTS idx_price_alerts_symbol_active ON price_alerts(symbol, is_active)`;
     await sql`CREATE INDEX IF NOT EXISTS idx_alarm_subscriptions_device_id ON alarm_subscriptions(device_id)`;
     await sql`CREATE INDEX IF NOT EXISTS idx_alarm_subscriptions_alarm_key ON alarm_subscriptions(alarm_key)`;
+    await sql`CREATE INDEX IF NOT EXISTS idx_custom_alerts_device_id ON custom_alerts(device_id)`;
+    await sql`CREATE INDEX IF NOT EXISTS idx_custom_alerts_user_id ON custom_alerts(user_id)`;
+    await sql`CREATE INDEX IF NOT EXISTS idx_custom_alerts_symbol ON custom_alerts(symbol)`;
+    await sql`CREATE INDEX IF NOT EXISTS idx_custom_alerts_type_active ON custom_alerts(alert_type, is_active)`;
 
     console.log('✅ Push notification database initialized');
     return true;
@@ -162,7 +190,7 @@ export async function initPushDatabase() {
 // Device operations
 export async function upsertDevice(deviceId, expoPushToken, platform, appVersion, userId = null, model = null, osVersion = null, language = null) {
   const sql = getSql();
-  
+
   // 🔥 CRITICAL FIX: If userId is provided, always update user_id (even if device already exists)
   // This ensures login users can link their devices automatically
   // COALESCE logic: If userId is provided (not null), use it. Otherwise, keep existing user_id.
@@ -226,14 +254,14 @@ export async function upsertDevice(deviceId, expoPushToken, platform, appVersion
       updated_at = CURRENT_TIMESTAMP
     RETURNING *
   `;
-  
+
   // Debug log (deviceLanguage already defined above at line 174)
   if (userId) {
     console.log(`[upsertDevice] ✅ Device ${deviceId} linked to user ${userId}, language: ${deviceLanguage}`);
   } else {
     console.log(`[upsertDevice] ⚠️  Device ${deviceId} registered without user_id (will be linked on login), language: ${deviceLanguage}`);
   }
-  
+
   return result[0];
 }
 
@@ -282,7 +310,7 @@ export async function getAllActiveDevices() {
  */
 export async function getPremiumTrialDevices() {
   const sql = getSql();
-  
+
   // Use CURRENT_TIMESTAMP for better PostgreSQL compatibility
   // This ensures we're using database server time, not client time
   // 🔥 APPLE GUIDELINE 5.1.1: Support guest users via device_id matching
@@ -341,7 +369,7 @@ export async function getPremiumTrialDevices() {
 // Price alert operations
 export async function createPriceAlert(deviceId, symbol, targetPrice, proximityDelta, direction, userId = null) {
   const sql = getSql();
-  
+
   // If userId not provided, get it from device
   if (!userId) {
     const device = await sql`
@@ -351,12 +379,12 @@ export async function createPriceAlert(deviceId, symbol, targetPrice, proximityD
       userId = device[0].user_id;
     }
   }
-  
+
   // Check if device exists, if not create it (for web users)
   const existingDevice = await sql`
     SELECT id FROM devices WHERE device_id = ${deviceId}
   `;
-  
+
   if (existingDevice.length === 0) {
     // Device doesn't exist, create it with placeholder token
     // This is for web users who don't have push tokens
@@ -368,7 +396,7 @@ export async function createPriceAlert(deviceId, symbol, targetPrice, proximityD
     `;
     console.log(`[createPriceAlert] Created device record for ${deviceId} (web user)`);
   }
-  
+
   const result = await sql`
     INSERT INTO price_alerts (device_id, user_id, symbol, target_price, proximity_delta, direction)
     VALUES (${deviceId}, ${userId}, ${symbol.toUpperCase()}, ${targetPrice}, ${proximityDelta}, ${direction})
@@ -379,7 +407,7 @@ export async function createPriceAlert(deviceId, symbol, targetPrice, proximityD
 
 export async function getPriceAlerts(deviceId, userId = null) {
   const sql = getSql();
-  
+
   // If userId provided, filter by both deviceId and userId
   if (userId) {
     return await sql`
@@ -390,7 +418,7 @@ export async function getPriceAlerts(deviceId, userId = null) {
       ORDER BY created_at DESC
     `;
   }
-  
+
   return await sql`
     SELECT * FROM price_alerts
     WHERE device_id = ${deviceId} AND is_active = true
@@ -400,7 +428,7 @@ export async function getPriceAlerts(deviceId, userId = null) {
 
 export async function getActivePriceAlertsBySymbol(symbol) {
   const sql = getSql();
-  
+
   // Only return alerts for premium/trial users
   // 🔥 APPLE GUIDELINE 5.1.1: Supports guest users via device_id matching
   return await sql`
@@ -457,7 +485,7 @@ export async function getActivePriceAlertsBySymbol(symbol) {
  */
 export async function getAllActiveCustomAlerts() {
   const sql = getSql();
-  
+
   // Only return alerts for premium/trial users
   // Supports both normal users (via user_id) and guest users (via device_id)
   return await sql`
@@ -569,5 +597,108 @@ export async function deleteAlarmSubscription(deviceId, alarmKey) {
   await sql`
     DELETE FROM alarm_subscriptions
     WHERE device_id = ${deviceId} AND alarm_key = ${alarmKey}
+  `;
+}
+
+// Custom alerts operations (volume spike and percentage change)
+export async function createCustomAlert(deviceId, userId, symbol, alertType, options) {
+  const sql = getSql();
+
+  const {
+    spikeMultiplier = null,
+    percentageThreshold = null,
+    timeframeMinutes = null,
+    direction = 'both',
+    cooldownMinutes = 30,
+  } = options;
+
+  const result = await sql`
+    INSERT INTO custom_alerts (
+      device_id, user_id, symbol, alert_type, 
+      spike_multiplier, percentage_threshold, timeframe_minutes, direction, cooldown_minutes
+    )
+    VALUES (
+      ${deviceId}, ${userId}, ${symbol.toUpperCase()}, ${alertType},
+      ${spikeMultiplier}, ${percentageThreshold}, ${timeframeMinutes}, ${direction}, ${cooldownMinutes}
+    )
+    RETURNING *
+  `;
+  return result[0];
+}
+
+export async function getCustomAlerts(deviceId, userId = null) {
+  const sql = getSql();
+
+  if (userId) {
+    return await sql`
+      SELECT * FROM custom_alerts
+      WHERE device_id = ${deviceId} AND user_id = ${userId} AND is_active = true
+      ORDER BY created_at DESC
+    `;
+  }
+
+  return await sql`
+    SELECT * FROM custom_alerts
+    WHERE device_id = ${deviceId} AND is_active = true
+    ORDER BY created_at DESC
+  `;
+}
+
+export async function getCustomAlertsByType(alertType) {
+  const sql = getSql();
+
+  // Get active custom alerts with device info for premium/trial users
+  return await sql`
+    SELECT 
+      ca.*,
+      d.expo_push_token,
+      d.platform,
+      d.language,
+      COALESCE(u.plan, u_guest.plan) as plan
+    FROM custom_alerts ca
+    JOIN devices d ON ca.device_id = d.device_id
+    LEFT JOIN users u ON d.user_id = u.id AND d.user_id IS NOT NULL
+    LEFT JOIN users u_guest ON d.device_id = u_guest.device_id AND u_guest.provider = 'guest' AND d.user_id IS NULL
+    WHERE ca.alert_type = ${alertType}
+      AND ca.is_active = true
+      AND d.is_active = true
+      AND (
+        (d.user_id IS NOT NULL AND u.id IS NOT NULL)
+        OR
+        (d.user_id IS NULL AND u_guest.id IS NOT NULL)
+      )
+      AND (
+        (COALESCE(u.plan, u_guest.plan) = 'premium' AND (COALESCE(u.expiry_date, u_guest.expiry_date) IS NULL OR COALESCE(u.expiry_date, u_guest.expiry_date) > CURRENT_TIMESTAMP))
+        OR
+        (
+          COALESCE(u.plan, u_guest.plan) = 'free' 
+          AND COALESCE(u.trial_started_at, u_guest.trial_started_at) IS NOT NULL
+          AND (
+            (COALESCE(u.trial_ended_at, u_guest.trial_ended_at) IS NULL AND (COALESCE(u.trial_started_at, u_guest.trial_started_at) + INTERVAL '3 days') > CURRENT_TIMESTAMP)
+            OR
+            (COALESCE(u.trial_ended_at, u_guest.trial_ended_at) IS NOT NULL AND COALESCE(u.trial_ended_at, u_guest.trial_ended_at) > CURRENT_TIMESTAMP)
+          )
+        )
+      )
+    ORDER BY ca.symbol, ca.created_at
+  `;
+}
+
+export async function updateCustomAlertNotification(id, lastValue) {
+  const sql = getSql();
+  await sql`
+    UPDATE custom_alerts
+    SET last_notified_at = CURRENT_TIMESTAMP,
+        last_value = ${lastValue},
+        updated_at = CURRENT_TIMESTAMP
+    WHERE id = ${id}
+  `;
+}
+
+export async function deleteCustomAlert(id, deviceId) {
+  const sql = getSql();
+  await sql`
+    DELETE FROM custom_alerts
+    WHERE id = ${id} AND device_id = ${deviceId}
   `;
 }

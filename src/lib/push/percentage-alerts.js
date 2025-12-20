@@ -4,8 +4,8 @@
  */
 
 import WebSocket from 'ws';
-import { getPremiumTrialDevices } from './db.js';
-import { sendPriceAlertNotification } from './unified-push.js';
+import { getPremiumTrialDevices, getCustomAlertsByType, updateCustomAlertNotification } from './db.js';
+import { sendPriceAlertNotification, sendPushNotifications } from './unified-push.js';
 
 /**
  * Yüzde değişim takip servisi
@@ -77,6 +77,10 @@ export class PercentageAlertService {
                 maxAge: 1440 * 60 * 1000, // 24 saat tutulacak
             });
         });
+
+        // Custom alert'ler için cache
+        this.customAlertsCache = new Map(); // symbol -> [alerts]
+        this.customAlertsCheckInterval = null;
     }
 
     /**
@@ -101,11 +105,22 @@ export class PercentageAlertService {
             this.connectToSymbol(symbol);
         });
 
+        // Custom alert'leri yükle
+        this.loadCustomAlerts();
+
+        // Her 30 saniyede custom alert'leri yeniden yükle
+        this.customAlertsCheckInterval = setInterval(() => {
+            if (this.isRunning) {
+                this.loadCustomAlerts();
+            }
+        }, 30000);
+
         // Periyodik fiyat kaydı ve kontrol
         this.historyInterval = setInterval(() => {
             if (this.isRunning) {
                 this.recordPrices();
                 this.checkPercentageChanges();
+                this.checkCustomPercentageAlerts();
             }
         }, this.HISTORY_RECORD_INTERVAL);
     }
@@ -123,12 +138,18 @@ export class PercentageAlertService {
             this.historyInterval = null;
         }
 
+        if (this.customAlertsCheckInterval) {
+            clearInterval(this.customAlertsCheckInterval);
+            this.customAlertsCheckInterval = null;
+        }
+
         this.wsConnections.forEach((ws) => {
             if (ws.readyState === WebSocket.OPEN) {
                 ws.close();
             }
         });
         this.wsConnections.clear();
+        this.customAlertsCache.clear();
 
         console.log('🛑 Percentage alert service stopped');
     }
@@ -390,7 +411,159 @@ export class PercentageAlertService {
             };
         });
 
+        status.customAlertsCount = Array.from(this.customAlertsCache.values()).reduce((sum, arr) => sum + arr.length, 0);
+
         return status;
+    }
+
+    /**
+     * Custom percentage alert'leri yükle
+     */
+    async loadCustomAlerts() {
+        try {
+            const alerts = await getCustomAlertsByType('percentage_change');
+
+            // Symbol bazında grupla
+            const alertsBySymbol = new Map();
+            alerts.forEach(alert => {
+                const symbol = alert.symbol.toUpperCase();
+                if (!alertsBySymbol.has(symbol)) {
+                    alertsBySymbol.set(symbol, []);
+                }
+                alertsBySymbol.get(symbol).push(alert);
+            });
+
+            // Cache'i güncelle
+            this.customAlertsCache = alertsBySymbol;
+
+            // Yeni symbol'ler için WebSocket bağlantısı kur
+            alertsBySymbol.forEach((alerts, symbol) => {
+                if (!this.wsConnections.has(symbol)) {
+                    console.log(`🔔 [PercentageAlerts] Connecting to custom symbol: ${symbol}`);
+                    this.connectToSymbol(symbol);
+
+                    // History yapısını başlat
+                    if (!this.priceHistory.has(symbol)) {
+                        this.priceHistory.set(symbol, {
+                            prices: [],
+                            maxAge: 1440 * 60 * 1000,
+                        });
+                    }
+                }
+            });
+
+            const customCount = alerts.length;
+            if (customCount > 0) {
+                console.log(`📊 [PercentageAlerts] Loaded ${customCount} custom percentage alert(s)`);
+            }
+        } catch (error) {
+            console.error('[PercentageAlerts] Error loading custom alerts:', error);
+        }
+    }
+
+    /**
+     * Custom percentage alert'leri kontrol et
+     */
+    async checkCustomPercentageAlerts() {
+        const now = Date.now();
+
+        for (const [symbol, alerts] of this.customAlertsCache) {
+            const currentPrice = this.priceCache.get(symbol);
+            const history = this.priceHistory.get(symbol);
+
+            if (!currentPrice || !history || history.prices.length === 0) continue;
+
+            for (const alert of alerts) {
+                const {
+                    id,
+                    percentage_threshold,
+                    timeframe_minutes,
+                    direction: alertDirection,
+                    last_notified_at,
+                    cooldown_minutes,
+                    expo_push_token,
+                    language
+                } = alert;
+
+                // Geçmiş fiyatı hesapla
+                const timeframeMs = parseInt(timeframe_minutes) * 60 * 1000;
+                const cutoff = now - timeframeMs;
+
+                const oldPrices = history.prices.filter(p => p.timestamp <= cutoff + 60000);
+                if (oldPrices.length === 0) continue;
+
+                const oldestPrice = oldPrices.reduce((closest, p) => {
+                    const closestDiff = Math.abs(closest.timestamp - cutoff);
+                    const pDiff = Math.abs(p.timestamp - cutoff);
+                    return pDiff < closestDiff ? p : closest;
+                });
+
+                // Yüzde değişimi hesapla
+                const percentChange = ((currentPrice - oldestPrice.price) / oldestPrice.price) * 100;
+                const absChange = Math.abs(percentChange);
+                const direction = percentChange > 0 ? 'up' : 'down';
+
+                // Direction kontrolü
+                if (alertDirection !== 'both' && alertDirection !== direction) continue;
+
+                // Threshold kontrolü
+                if (absChange < parseFloat(percentage_threshold)) continue;
+
+                // Cooldown kontrolü
+                if (last_notified_at) {
+                    const cooldownMs = (cooldown_minutes || 30) * 60 * 1000;
+                    const timeSince = Date.now() - new Date(last_notified_at).getTime();
+                    if (timeSince < cooldownMs) continue;
+                }
+
+                // Token kontrolü
+                if (!expo_push_token || expo_push_token.length <= 10) continue;
+
+                const lowerToken = expo_push_token.toLowerCase();
+                if (lowerToken.includes('test') || lowerToken === 'unknown') continue;
+
+                // Bildirim gönder
+                const lang = language ? language.toLowerCase() : 'tr';
+                const isTurkish = lang.startsWith('tr');
+
+                const directionEmoji = direction === 'up' ? '📈' : '📉';
+                const formattedCurrent = currentPrice.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                const formattedOld = oldestPrice.price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                const timeframeLabel = timeframe_minutes == 60 ? '1h' : timeframe_minutes == 240 ? '4h' : '24h';
+
+                let title, body;
+                if (isTurkish) {
+                    const actionTr = direction === 'up' ? 'yükseldi' : 'düştü';
+                    title = `${symbol} %${absChange.toFixed(1)} ${actionTr}! ${directionEmoji}`;
+                    body = `Son ${timeframeLabel}'de: $${formattedOld} → $${formattedCurrent}`;
+                } else {
+                    title = `${symbol} ${absChange.toFixed(1)}% ${direction}! ${directionEmoji}`;
+                    body = `Last ${timeframeLabel}: $${formattedOld} → $${formattedCurrent}`;
+                }
+
+                try {
+                    await sendPushNotifications([{
+                        to: [expo_push_token],
+                        title: title,
+                        body: body,
+                        data: {
+                            type: 'custom_percentage_change',
+                            symbol: symbol,
+                            percentChange: percentChange.toString(),
+                            timeframe: timeframe_minutes.toString(),
+                        },
+                        sound: 'default',
+                        channelId: 'percentage-alerts',
+                        priority: 'high',
+                    }]);
+
+                    await updateCustomAlertNotification(id, percentChange);
+                    console.log(`✅ [PercentageAlerts] Custom alert triggered: ${symbol} ${absChange.toFixed(1)}% [${isTurkish ? 'TR' : 'EN'}]`);
+                } catch (error) {
+                    console.error('[PercentageAlerts] Error sending custom alert:', error);
+                }
+            }
+        }
     }
 }
 
