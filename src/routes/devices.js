@@ -105,14 +105,14 @@ router.post('/link', authenticateToken, async (req, res) => {
 
     // Check if device exists
     let device = await getDevice(deviceId);
-    
+
     // 🔥 CRITICAL: If device doesn't exist, create it automatically
     if (!device) {
       console.log(`[Device Link] Device ${deviceId} not found, creating automatically...`);
-      
+
       // Determine platform from request or default to 'ios'
       const devicePlatform = platform || req.body.platform || 'ios';
-      
+
       // 🔥 FIX: Allow device creation without pushToken
       // Push token can be added later when push notifications are initialized
       // This allows device linking to work immediately after login, even if push token isn't ready yet
@@ -129,7 +129,7 @@ router.post('/link', authenticateToken, async (req, res) => {
       } else {
         console.log(`[Device Link] ⚠️  No pushToken provided for device ${deviceId}. Creating device without push token (will be updated later).`);
       }
-      
+
       // Create device (with or without pushToken)
       // upsertDevice accepts null for expoPushToken
       device = await upsertDevice(
@@ -142,23 +142,15 @@ router.post('/link', authenticateToken, async (req, res) => {
         null, // osVersion
         language || 'tr' // Default to Turkish if not provided
       );
-      
+
       console.log(`✅ Device ${deviceId} created automatically and linked to user ${userId}${pushToken ? ' (with push token)' : ' (push token will be added later)'}`);
     } else {
-      // Device exists, just update userId
-      const postgres = (await import('postgres')).default;
-      if (!process.env.DATABASE_URL) {
-        throw new Error('DATABASE_URL environment variable is not set');
-      }
-      const sql = postgres(process.env.DATABASE_URL, {
-        max: 1,
-        idle_timeout: 20,
-        connect_timeout: 10,
-      });
-      
-      // Update pushToken if provided (and validate it's not a placeholder)
-      if (pushToken && pushToken !== device.expo_push_token) {
-        // Validate pushToken is not a placeholder
+      // Device exists, just update using upsertDevice (uses proper connection pool)
+      // 🔥 FIX: Previously created new postgres connection on every request (connection leak!)
+      // Now using upsertDevice which uses the singleton connection pool
+
+      // Validate pushToken if provided
+      if (pushToken) {
         if (pushToken.toLowerCase().includes('placeholder')) {
           console.error(`[Device Link] ❌ Invalid pushToken provided (contains 'placeholder'): ${pushToken.substring(0, 40)}...`);
           return res.status(400).json({
@@ -166,30 +158,20 @@ router.post('/link', authenticateToken, async (req, res) => {
             invalidToken: true
           });
         }
-        
-        console.log(`[Device Link] Updating push token for device ${deviceId}`);
-        const updateResult = await sql`
-          UPDATE devices
-          SET user_id = ${userId},
-              expo_push_token = ${pushToken},
-              language = ${language || 'tr'},
-              updated_at = CURRENT_TIMESTAMP
-          WHERE device_id = ${deviceId}
-          RETURNING *
-        `;
-        device = updateResult[0];
-      } else {
-        // Just update userId and language
-        const updateResult = await sql`
-          UPDATE devices
-          SET user_id = ${userId},
-              language = ${language || 'tr'},
-              updated_at = CURRENT_TIMESTAMP
-          WHERE device_id = ${deviceId}
-          RETURNING *
-        `;
-        device = updateResult[0];
+        console.log(`[Device Link] Updating device ${deviceId} with new push token`);
       }
+
+      // Use upsertDevice for proper connection pooling
+      device = await upsertDevice(
+        deviceId,
+        pushToken || device.expo_push_token, // Keep existing token if not provided
+        device.platform,
+        device.app_version || '1.0.0',
+        userId, // Link to user
+        device.model,
+        device.os_version,
+        language || device.language || 'tr'
+      );
 
       if (!device) {
         return res.status(404).json({

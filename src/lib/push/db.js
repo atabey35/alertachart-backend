@@ -13,7 +13,7 @@ function getSql() {
     }
     // Railway PostgreSQL connection
     sql = postgres(process.env.DATABASE_URL, {
-      max: 1, // Connection pool size
+      max: 10, // 🔥 Increased from 1 to handle more concurrent requests
       idle_timeout: 20,
       connect_timeout: 10,
     });

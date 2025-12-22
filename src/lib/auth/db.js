@@ -13,7 +13,7 @@ export function getSql() {
     }
     // Railway PostgreSQL connection
     sql = postgres(process.env.DATABASE_URL, {
-      max: 1, // Connection pool size
+      max: 10, // 🔥 Increased from 1 to handle more concurrent requests
       idle_timeout: 20,
       connect_timeout: 10,
     });
@@ -78,7 +78,7 @@ export async function initAuthDatabase() {
     // Add user_id columns to existing tables if they don't exist
     try {
       await sql`ALTER TABLE devices ADD COLUMN IF NOT EXISTS user_id INTEGER`;
-      
+
       // Check if constraint exists before adding (PostgreSQL doesn't support IF NOT EXISTS for constraints)
       const constraintExists = await sql`
         SELECT 1 FROM pg_constraint 
@@ -96,7 +96,7 @@ export async function initAuthDatabase() {
 
     try {
       await sql`ALTER TABLE price_alerts ADD COLUMN IF NOT EXISTS user_id INTEGER`;
-      
+
       const constraintExists = await sql`
         SELECT 1 FROM pg_constraint 
         WHERE conname = 'fk_price_alerts_user_id' 
@@ -112,7 +112,7 @@ export async function initAuthDatabase() {
 
     try {
       await sql`ALTER TABLE alarm_subscriptions ADD COLUMN IF NOT EXISTS user_id INTEGER`;
-      
+
       const constraintExists = await sql`
         SELECT 1 FROM pg_constraint 
         WHERE conname = 'fk_alarm_subscriptions_user_id' 
@@ -140,9 +140,9 @@ export async function initAuthDatabase() {
         WHERE table_name = 'users' 
           AND column_name = 'device_id'
       `;
-      
+
       console.log(`[Migration] device_id column exists: ${columnExists.length > 0}`);
-      
+
       if (columnExists.length > 0) {
         console.log('🔄 [Migration] Dropping existing device_id column...');
         // Drop the column (this will fail if there are constraints, so we handle it)
@@ -167,7 +167,7 @@ export async function initAuthDatabase() {
           }
         }
       }
-      
+
       // Create device_id column with UNIQUE constraint
       console.log('🔄 [Migration] Creating device_id column with UNIQUE constraint...');
       await sql`ALTER TABLE users ADD COLUMN device_id TEXT UNIQUE`;
