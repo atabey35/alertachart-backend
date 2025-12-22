@@ -146,15 +146,32 @@ export class VolumeAlertService {
      * Symbol için WebSocket bağlantısı kur
      */
     connectToSymbol(symbol) {
-        if (this.wsConnections.has(symbol)) return;
+        // 🔥 Sembol normalizasyonu: USDT suffix ekle
+        let normalizedSymbol = symbol.toUpperCase().trim();
+        if (!normalizedSymbol.endsWith('USDT') && !normalizedSymbol.endsWith('BTC') && !normalizedSymbol.endsWith('ETH')) {
+            normalizedSymbol = normalizedSymbol + 'USDT';
+            console.log(`[VolumeAlerts] Normalized symbol: ${symbol} → ${normalizedSymbol}`);
+        }
 
-        const wsUrl = `wss://stream.binance.com:9443/ws/${symbol.toLowerCase()}@ticker`;
+        if (this.wsConnections.has(normalizedSymbol)) return;
+
+        const wsUrl = `wss://stream.binance.com:9443/ws/${normalizedSymbol.toLowerCase()}@ticker`;
 
         try {
             const ws = new WebSocket(wsUrl);
 
+            // 🔥 Bağlantı timeout - 10 saniye içinde açılmazsa kapat
+            const connectionTimeout = setTimeout(() => {
+                if (ws.readyState !== WebSocket.OPEN) {
+                    console.warn(`[VolumeAlerts] Connection timeout for ${normalizedSymbol}, closing...`);
+                    ws.terminate();
+                    this.wsConnections.delete(normalizedSymbol);
+                }
+            }, 10000);
+
             ws.on('open', () => {
-                console.log(`✅ [VolumeAlerts] Connected to ${symbol} feed`);
+                clearTimeout(connectionTimeout);
+                console.log(`✅ [VolumeAlerts] Connected to ${normalizedSymbol} feed`);
             });
 
             ws.on('message', (data) => {
@@ -170,38 +187,47 @@ export class VolumeAlertService {
                     const quoteVolume = parseFloat(message.q); // USDT cinsinden hacim
 
                     if (price) {
-                        this.priceCache.set(symbol, price);
+                        this.priceCache.set(normalizedSymbol, price);
                     }
 
                     if (quoteVolume) {
-                        this.volumeCache.set(symbol, quoteVolume);
+                        this.volumeCache.set(normalizedSymbol, quoteVolume);
                     }
                 } catch (error) {
-                    console.error(`[VolumeAlerts] Error parsing ${symbol}:`, error);
+                    console.error(`[VolumeAlerts] Error parsing ${normalizedSymbol}:`, error);
                 }
             });
 
             ws.on('error', (error) => {
-                console.error(`[VolumeAlerts] WebSocket error for ${symbol}:`, error.message);
+                clearTimeout(connectionTimeout);
+                console.error(`[VolumeAlerts] WebSocket error for ${normalizedSymbol}:`, error.message);
+
+                // 🔥 400/Bad Request hatası durumunda retry yapma - geçersiz sembol
+                if (error.message && (error.message.includes('400') || error.message.includes('Unexpected server response'))) {
+                    console.warn(`[VolumeAlerts] ⚠️ Invalid symbol ${normalizedSymbol} - not retrying`);
+                    this.wsConnections.delete(normalizedSymbol);
+                    return; // Retry yapma
+                }
             });
 
             ws.on('close', () => {
-                console.log(`❌ [VolumeAlerts] Disconnected from ${symbol}`);
-                this.wsConnections.delete(symbol);
+                clearTimeout(connectionTimeout);
+                console.log(`❌ [VolumeAlerts] Disconnected from ${normalizedSymbol}`);
+                this.wsConnections.delete(normalizedSymbol);
 
-                // Yeniden bağlan
-                if (this.isRunning) {
+                // Yeniden bağlan (sadece geçerli semboller için)
+                if (this.isRunning && !this.invalidSymbols?.has(normalizedSymbol)) {
                     setTimeout(() => {
                         if (this.isRunning) {
-                            this.connectToSymbol(symbol);
+                            this.connectToSymbol(normalizedSymbol);
                         }
                     }, 5000);
                 }
             });
 
-            this.wsConnections.set(symbol, ws);
+            this.wsConnections.set(normalizedSymbol, ws);
         } catch (error) {
-            console.error(`[VolumeAlerts] Failed to connect to ${symbol}:`, error);
+            console.error(`[VolumeAlerts] Failed to connect to ${normalizedSymbol}:`, error);
         }
     }
 
