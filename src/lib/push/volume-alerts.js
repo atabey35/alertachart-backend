@@ -146,12 +146,8 @@ export class VolumeAlertService {
      * Symbol için WebSocket bağlantısı kur
      */
     connectToSymbol(symbol) {
-        // 🔥 Sembol normalizasyonu: USDT suffix ekle
-        let normalizedSymbol = symbol.toUpperCase().trim();
-        if (!normalizedSymbol.endsWith('USDT') && !normalizedSymbol.endsWith('BTC') && !normalizedSymbol.endsWith('ETH')) {
-            normalizedSymbol = normalizedSymbol + 'USDT';
-            console.log(`[VolumeAlerts] Normalized symbol: ${symbol} → ${normalizedSymbol}`);
-        }
+        // Symbol'ü uppercase ve trim yap (normalizasyon USDT eklemez - kullanıcı düzgün yazmalı)
+        const normalizedSymbol = symbol.toUpperCase().trim();
 
         if (this.wsConnections.has(normalizedSymbol)) return;
 
