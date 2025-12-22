@@ -521,13 +521,62 @@ router.post('/percentage', optionalAuth, async (req, res) => {
  */
 router.get('/custom', optionalAuth, async (req, res) => {
   try {
-    const { deviceId } = req.query;
+    const { deviceId, userEmail } = req.query;
 
     if (!deviceId) {
       return res.status(400).json({ error: 'Missing deviceId' });
     }
 
     let userId = req.user?.userId;
+
+    // 🔥 CRITICAL: For guest users, if no userId from cookie/token, try to find user by device_id and userEmail
+    if (!userId && deviceId) {
+      console.log('[Alerts GET Custom] 🔓 Guest user detected, trying to find user:', {
+        deviceId: deviceId.substring(0, 20) + '...',
+        userEmail: userEmail || 'not provided',
+      });
+
+      try {
+        const sql = getAuthSql();
+        let guestUsers = [];
+
+        // First try: device_id only
+        guestUsers = await sql`
+          SELECT id, email, plan, expiry_date, trial_started_at, trial_ended_at, device_id
+          FROM users 
+          WHERE device_id = ${deviceId}
+          AND provider = 'guest'
+          LIMIT 1
+        `;
+
+        // Fallback: email if provided
+        if (guestUsers.length === 0 && userEmail) {
+          console.log('[Alerts GET Custom] ⚠️ Guest user not found by device_id, trying email...');
+          guestUsers = await sql`
+            SELECT id, email, plan, expiry_date, trial_started_at, trial_ended_at, device_id
+            FROM users 
+            WHERE email = ${userEmail}
+            AND provider = 'guest'
+            LIMIT 1
+          `;
+        }
+
+        if (guestUsers.length > 0) {
+          userId = guestUsers[0].id;
+          console.log('[Alerts GET Custom] ✅ Guest user found:', {
+            userId,
+            email: guestUsers[0].email,
+            plan: guestUsers[0].plan,
+            device_id_in_db: guestUsers[0].device_id ? guestUsers[0].device_id.substring(0, 20) + '...' : 'null',
+            device_id_request: deviceId.substring(0, 20) + '...',
+          });
+        } else {
+          console.log('[Alerts GET Custom] ⚠️ Guest user not found');
+        }
+      } catch (guestError) {
+        console.error('[Alerts GET Custom] ❌ Error finding guest user:', guestError);
+      }
+    }
 
     if (!userId) {
       return res.status(401).json({ error: 'Authentication required' });
