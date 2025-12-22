@@ -339,7 +339,7 @@ router.get('/price', optionalAuth, async (req, res) => {
  */
 router.delete('/price', optionalAuth, async (req, res) => {
   try {
-    const { id, deviceId } = req.body;
+    const { id, deviceId, userEmail } = req.body;
 
     if (!id || !deviceId) {
       return res.status(400).json({
@@ -347,8 +347,55 @@ router.delete('/price', optionalAuth, async (req, res) => {
       });
     }
 
-    // Premium check
-    const userId = req.user?.userId;
+    let userId = req.user?.userId;
+
+    // 🔥 CRITICAL: For guest users, if no userId from cookie/token, try to find user by device_id and userEmail
+    if (!userId && deviceId) {
+      console.log('[Alerts DELETE Price] 🔓 Guest user detected, trying to find user:', {
+        deviceId: deviceId.substring(0, 20) + '...',
+        userEmail: userEmail || 'not provided',
+      });
+
+      try {
+        const sql = getAuthSql();
+        let guestUsers = [];
+
+        // First try: device_id only
+        guestUsers = await sql`
+          SELECT id, email, plan, expiry_date, trial_started_at, trial_ended_at, device_id
+          FROM users 
+          WHERE device_id = ${deviceId}
+          AND provider = 'guest'
+          LIMIT 1
+        `;
+
+        // Fallback: email if provided
+        if (guestUsers.length === 0 && userEmail) {
+          console.log('[Alerts DELETE Price] ⚠️ Guest user not found by device_id, trying email...');
+          guestUsers = await sql`
+            SELECT id, email, plan, expiry_date, trial_started_at, trial_ended_at, device_id
+            FROM users 
+            WHERE email = ${userEmail}
+            AND provider = 'guest'
+            LIMIT 1
+          `;
+        }
+
+        if (guestUsers.length > 0) {
+          userId = guestUsers[0].id;
+          console.log('[Alerts DELETE Price] ✅ Guest user found:', {
+            userId,
+            email: guestUsers[0].email,
+            plan: guestUsers[0].plan,
+          });
+        } else {
+          console.log('[Alerts DELETE Price] ⚠️ Guest user not found');
+        }
+      } catch (guestError) {
+        console.error('[Alerts DELETE Price] ❌ Error finding guest user:', guestError);
+      }
+    }
+
     if (!userId) {
       return res.status(401).json({
         error: 'Authentication required'
