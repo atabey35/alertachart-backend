@@ -5,6 +5,7 @@
 import express from 'express';
 import { getAllActiveDevices } from '../lib/push/db.js';
 import { sendPushNotifications } from '../lib/push/unified-push.js';
+import { getSql } from '../lib/auth/db.js';
 
 const router = express.Router();
 
@@ -28,12 +29,12 @@ router.post('/broadcast', async (req, res) => {
 
     // Get ALL active devices
     const devices = await getAllActiveDevices();
-    
+
     // 🔥 MULTILINGUAL: Filtreleme mantığı
     const filteredDevices = devices.filter(d => {
       const deviceLang = d.language ? d.language.toLowerCase() : 'tr';
       const isTr = deviceLang.startsWith('tr');
-      
+
       if (targetLang === 'tr') {
         // Sadece Türkçe cihazlar
         return isTr;
@@ -45,13 +46,13 @@ router.post('/broadcast', async (req, res) => {
         return true;
       }
     });
-    
+
     console.log(`📊 Filtered devices: ${filteredDevices.length} / ${devices.length} (target: ${targetLang})`);
 
     if (filteredDevices.length === 0) {
       console.log(`📱 No active devices found for target: ${targetLang}`);
-      return res.json({ 
-        success: true, 
+      return res.json({
+        success: true,
         message: `No active devices for target: ${targetLang}`,
         sent: 0,
         totalDevices: devices.length,
@@ -71,10 +72,10 @@ router.post('/broadcast', async (req, res) => {
         if (!token) return false;
         // Exclude any test tokens, placeholders, or invalid tokens (case-insensitive)
         const lowerToken = token.toLowerCase();
-        if (lowerToken.includes('test') || 
-            lowerToken.includes('placeholder') || 
-            lowerToken === 'unknown' ||
-            lowerToken.includes('invalid')) {
+        if (lowerToken.includes('test') ||
+          lowerToken.includes('placeholder') ||
+          lowerToken === 'unknown' ||
+          lowerToken.includes('invalid')) {
           return false;
         }
         // FCM tokens only - validate length and format
@@ -87,8 +88,8 @@ router.post('/broadcast', async (req, res) => {
 
     if (deviceTokens.length === 0) {
       console.log(`📱 No valid push tokens found for target: ${targetLang}`);
-      return res.json({ 
-        success: true, 
+      return res.json({
+        success: true,
         message: `No valid tokens for target: ${targetLang}`,
         sent: 0,
         totalDevices: devices.length,
@@ -103,7 +104,7 @@ router.post('/broadcast', async (req, res) => {
     console.log(`   iOS devices: ${iosDevices.length}`);
     console.log(`   Android devices: ${androidDevices.length}`);
     console.log(`   First token example: ${deviceTokens[0].token.substring(0, 50)}...`);
-    
+
     // Log iOS device tokens for debugging
     if (iosDevices.length > 0) {
       console.log(`   iOS token examples:`);
@@ -138,7 +139,26 @@ router.post('/broadcast', async (req, res) => {
       console.log(`   Title: ${title}`);
       console.log(`   Message: ${message}`);
 
-      res.json({ 
+      // 🔥 CRITICAL: Save notification to database so it appears in Settings notification list
+      try {
+        const sql = getSql();
+
+        // Map targetLang to database format ('all', 'tr', or 'en')
+        const dbTargetLang = targetLang === 'all' ? 'all' : targetLang;
+
+        // Insert as global notification (user_id = NULL means broadcast to all)
+        await sql`
+          INSERT INTO notifications (title, message, user_id, is_read, target_lang, created_at)
+          VALUES (${title}, ${message}, NULL, false, ${dbTargetLang}, NOW())
+        `;
+        console.log(`💾 Broadcast notification saved to database (target_lang: ${dbTargetLang})`);
+      } catch (dbError) {
+        // Log error but don't fail the broadcast - push was already sent
+        console.error('⚠️ Failed to save notification to database:', dbError.message);
+        console.error('   This means notification won\'t appear in Settings notification list');
+      }
+
+      res.json({
         success: true,
         sent: tokens.length,
         totalDevices: devices.length,
@@ -167,8 +187,8 @@ router.post('/broadcast', async (req, res) => {
 router.get('/stats', async (req, res) => {
   try {
     const devices = await getAllActiveDevices();
-    
-    const validTokens = devices.filter(d => 
+
+    const validTokens = devices.filter(d =>
       d.expo_push_token && !d.expo_push_token.includes('test-token')
     ).length;
 
