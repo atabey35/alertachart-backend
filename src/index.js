@@ -19,6 +19,7 @@ import { getAutoPriceAlertService } from './lib/push/auto-price-alerts.js';
 import { getPercentageAlertService } from './lib/push/percentage-alerts.js';
 import { getVolumeAlertService } from './lib/push/volume-alerts.js';
 import { getScheduledSummaryService } from './lib/push/scheduled-summary.js';
+import { getFundingOIAlertService } from './lib/push/funding-oi-alerts.js';
 import { initPushDatabase } from './lib/push/db.js';
 import { initAuthDatabase } from './lib/auth/db.js';
 
@@ -152,6 +153,9 @@ app.listen(PORT, async () => {
 
   const scheduledSummaryService = getScheduledSummaryService();
   scheduledSummaryService.start();
+
+  const fundingOIService = getFundingOIAlertService();
+  fundingOIService.start();
 
   console.log('');
   console.log('✅ All services running!');
