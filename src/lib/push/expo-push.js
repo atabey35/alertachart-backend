@@ -49,7 +49,7 @@ export async function sendPushNotifications(payloads) {
           priority: payload.priority || 'high',
           ttl: payload.ttl || 86400,
         };
-        
+
         // Only add optional fields if they have valid values
         if (payload.color && /^#[0-9A-Fa-f]{6}$/.test(payload.color)) {
           message.color = payload.color;
@@ -69,7 +69,7 @@ export async function sendPushNotifications(payloads) {
         if (payload.collapseId) {
           message.collapseId = payload.collapseId;
         }
-        
+
         messages.push(message);
       }
     }
@@ -99,11 +99,11 @@ export async function sendPushNotifications(payloads) {
     let hasErrors = false;
     let errorCount = 0;
     let successCount = 0;
-    
+
     for (let i = 0; i < tickets.length; i++) {
       const ticket = tickets[i];
       const message = messages[i];
-      
+
       if (ticket.status === 'error') {
         hasErrors = true;
         errorCount++;
@@ -113,7 +113,7 @@ export async function sendPushNotifications(payloads) {
           details: ticket.details,
           errorCode: ticket.details?.errorCode,
         });
-        
+
         // Log specific error types
         if (ticket.details?.errorCode === 'DeviceNotRegistered') {
           console.error(`   ⚠️  Device not registered - token may be invalid or expired`);
@@ -129,12 +129,12 @@ export async function sendPushNotifications(payloads) {
 
     console.log(`✅ Sent ${messages.length} push notifications, ${tickets.length} tickets received`);
     console.log(`   Success: ${successCount}, Errors: ${errorCount}`);
-    
+
     // If there are errors, log a summary
     if (hasErrors) {
       console.warn(`⚠️  ${errorCount} Expo push notification(s) failed. Check error details above.`);
     }
-    
+
     return !hasErrors;
   } catch (error) {
     console.error('Failed to send push notifications:', error);
@@ -148,11 +148,11 @@ export async function sendPushNotifications(payloads) {
 export async function sendPriceAlertNotification(tokens, symbol, currentPrice, targetPrice, direction) {
   const emoji = direction === 'up' ? '📈' : '📉';
   const actionText = direction === 'up' ? 'yaklaşıyor' : 'iniyor';
-  
+
   // Format prices nicely
   const formattedTarget = targetPrice.toLocaleString('en-US');
   const formattedCurrent = currentPrice.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  
+
   return sendPushNotifications([{
     to: tokens,
     title: `${symbol} ${emoji}`,
@@ -177,7 +177,7 @@ export async function sendAlarmNotification(tokens, symbol, message, alarmData) 
   // Ensure symbol is uppercase
   const upperSymbol = symbol.toUpperCase();
   const brandColor = '#0a84ff';
-  
+
   return sendPushNotifications([{
     to: tokens,
     title: `Alarm: ${upperSymbol}`,
@@ -197,14 +197,42 @@ export async function sendAlarmNotification(tokens, symbol, message, alarmData) 
 
 /**
  * Format price for display
- * - Prices < 1: 4 decimals
- * - Prices >= 1: 2 decimals
+ * Smart formatting based on price magnitude:
+ * - Prices >= 1000: 0 decimals (e.g., 94000)
+ * - Prices >= 1: 2 decimals (e.g., 4.25)
+ * - Prices >= 0.01: 4 decimals (e.g., 0.0559)
+ * - Prices < 0.01: 6-8 decimals for very small amounts
  */
 export function formatPrice(price) {
-  if (price < 1) {
+  if (price >= 1000) {
+    return parseFloat(price.toFixed(0));
+  } else if (price >= 1) {
+    return parseFloat(price.toFixed(2));
+  } else if (price >= 0.01) {
     return parseFloat(price.toFixed(4));
+  } else if (price >= 0.0001) {
+    return parseFloat(price.toFixed(6));
+  } else {
+    return parseFloat(price.toFixed(8));
   }
-  return parseFloat(price.toFixed(2));
+}
+
+/**
+ * Format price as string for display in notifications
+ * Returns human-readable string with appropriate decimals
+ */
+export function formatPriceString(price) {
+  if (price >= 1000) {
+    return price.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+  } else if (price >= 1) {
+    return price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  } else if (price >= 0.01) {
+    return price.toFixed(4);
+  } else if (price >= 0.0001) {
+    return price.toFixed(6);
+  } else {
+    return price.toFixed(8);
+  }
 }
 
 /**

@@ -6,6 +6,28 @@
 import { sendFCMNotification, sendFCMNotifications } from './fcm-push.js';
 
 /**
+ * Format price as string for display in notifications
+ * Returns human-readable string with appropriate decimals based on price magnitude
+ * - Prices >= 1000: no decimals
+ * - Prices >= 1: 2 decimals
+ * - Prices >= 0.01: 4 decimals
+ * - Prices < 0.01: 6-8 decimals
+ */
+export function formatPriceString(price) {
+  if (price >= 1000) {
+    return price.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+  } else if (price >= 1) {
+    return price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  } else if (price >= 0.01) {
+    return price.toFixed(4);
+  } else if (price >= 0.0001) {
+    return price.toFixed(6);
+  } else {
+    return price.toFixed(8);
+  }
+}
+
+/**
  * Send push notification to single device (FCM only)
  */
 export async function sendPushNotification(token, title, body, data) {
@@ -22,16 +44,16 @@ export async function sendPushNotifications(payloads) {
 
   for (const payload of payloads) {
     const tokens = Array.isArray(payload.to) ? payload.to : [payload.to];
-    
+
     // Filter out invalid tokens (placeholders, test tokens, etc.)
     const validTokens = tokens.filter(token => {
       if (!token || typeof token !== 'string') return false;
       const lowerToken = token.toLowerCase();
       // Reject placeholders, test tokens, and invalid tokens
-      if (lowerToken.includes('placeholder') || 
-          lowerToken.includes('test') || 
-          lowerToken === 'unknown' ||
-          token.length < 50) { // FCM tokens are typically longer
+      if (lowerToken.includes('placeholder') ||
+        lowerToken.includes('test') ||
+        lowerToken === 'unknown' ||
+        token.length < 50) { // FCM tokens are typically longer
         return false;
       }
       return true;
@@ -52,7 +74,7 @@ export async function sendPushNotifications(payloads) {
 
   const fcmTokenCount = fcmPayloads.reduce((sum, p) => sum + (Array.isArray(p.token) ? p.token.length : 1), 0);
   console.log(`[UnifiedPush] Sending ${fcmPayloads.length} payloads via FCM (${fcmTokenCount} tokens)`);
-  
+
   return await sendFCMNotifications(fcmPayloads);
 }
 
@@ -69,7 +91,7 @@ export async function sendPushNotifications(payloads) {
  */
 export async function sendPriceAlertNotification(tokens, symbol, currentPrice, targetPrice, direction, customTitle = null, customBody = null) {
   const emoji = direction === 'up' ? '📈' : '📉';
-  
+
   // If custom title/body provided, use them (for multilingual support)
   if (customTitle && customBody) {
     return sendPushNotifications([{
@@ -88,14 +110,14 @@ export async function sendPriceAlertNotification(tokens, symbol, currentPrice, t
       priority: 'high',
     }]);
   }
-  
+
   // Default Turkish message (backward compatibility)
   const actionText = direction === 'up' ? 'yaklaşıyor' : 'iniyor';
-  
+
   // Format prices nicely
   const formattedTarget = targetPrice.toLocaleString('en-US');
   const formattedCurrent = currentPrice.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  
+
   return sendPushNotifications([{
     to: tokens,
     title: `${symbol} ${emoji}`,
@@ -126,7 +148,7 @@ export async function sendPriceAlertNotification(tokens, symbol, currentPrice, t
 export async function sendAlarmNotification(tokens, symbol, message, alarmData, customTitle = null, customBody = null) {
   // Ensure symbol is uppercase
   const upperSymbol = symbol.toUpperCase();
-  
+
   // If custom title/body provided, use them (for multilingual support)
   if (customTitle && customBody) {
     return sendPushNotifications([{
@@ -145,7 +167,7 @@ export async function sendAlarmNotification(tokens, symbol, message, alarmData, 
       icon: 'notification_icon',
     }]);
   }
-  
+
   // Default Turkish message (backward compatibility)
   return sendPushNotifications([{
     to: tokens,
@@ -181,7 +203,7 @@ export async function sendTestNotification(token, customTitle = null, customBody
       { test: true, timestamp: Date.now() }
     );
   }
-  
+
   // Default Turkish message (backward compatibility)
   return sendPushNotification(
     token,
