@@ -21,7 +21,11 @@ export class VolumeAlertService {
         this.isRunning = false;
         this.checkInterval = null;
 
-        // Bildirim cooldown - Aynı symbol+multiplier için 60 dakika bekle
+        // 🔥 Progressive threshold tracking - Günlük bazda hangi multiplier'a ulaşıldığını takip et
+        // Key: symbol, Value: { reachedLevel: 2|3|5, date: 'YYYY-MM-DD' }
+        this.dailyThresholds = new Map();
+
+        // Bildirim cooldown - Sadece aynı level için (artık gereksiz ama backward compat için)
         this.NOTIFICATION_COOLDOWN = 60 * 60 * 1000; // 60 dakika
 
         // Hacim kontrol aralığı
@@ -254,8 +258,13 @@ export class VolumeAlertService {
 
     /**
      * Hacim spike'larını kontrol et
+     * 🔥 Progressive threshold: 2x tetiklenince, gün boyunca 2x tekrar gelmez.
+     * Sadece daha yüksek seviyeler (3x, 5x) bildirim gönderir.
+     * Gece yarısı UTC'de sıfırlanır.
      */
     async checkVolumeSpikes() {
+        const today = new Date().toISOString().split('T')[0]; // 'YYYY-MM-DD'
+
         for (const [symbol, config] of Object.entries(this.watchList)) {
             const currentVolume = this.volumeCache.get(symbol);
             const currentPrice = this.priceCache.get(symbol);
@@ -269,32 +278,48 @@ export class VolumeAlertService {
             // Spike oranını hesapla
             const spikeRatio = currentVolume / history.baselineVolume;
 
+            // 🔥 Günlük threshold kontrolü - Bu symbol için bugün hangi seviyeye ulaşıldı?
+            const thresholdData = this.dailyThresholds.get(symbol);
+            let reachedLevel = 0;
+
+            if (thresholdData && thresholdData.date === today) {
+                // Bugün zaten bir seviye tetiklenmişse, o seviyeyi al
+                reachedLevel = thresholdData.reachedLevel;
+            } else {
+                // Yeni gün - sıfırla
+                this.dailyThresholds.set(symbol, { reachedLevel: 0, date: today });
+            }
+
             // Multiplier'ları kontrol et (büyükten küçüğe)
             const sortedMultipliers = [...config.spikeMultipliers].sort((a, b) => b - a);
 
             for (const multiplier of sortedMultipliers) {
                 if (spikeRatio >= multiplier) {
-                    // Cooldown kontrolü
-                    const cooldownKey = `${symbol}_${multiplier}x`;
-
-                    if (this.shouldNotify(cooldownKey)) {
-                        // Bildirim gönder
-                        await this.sendNotificationToAll(
-                            symbol,
-                            config.name,
-                            config.emoji,
-                            currentPrice,
-                            currentVolume,
-                            history.baselineVolume,
-                            spikeRatio,
-                            multiplier
-                        );
-
-                        this.markNotified(cooldownKey);
-
-                        // En büyük multiplier'ı bulduk, diğerlerini kontrol etme
+                    // 🔥 Progressive check: Bu seviye zaten tetiklendi mi?
+                    if (multiplier <= reachedLevel) {
+                        // Bu seviye veya daha düşük bir seviye zaten tetiklendi, atla
+                        // console.log(`[VolumeAlerts] ${symbol} ${multiplier}x already triggered today (reached: ${reachedLevel}x)`);
                         break;
                     }
+
+                    // Yeni, daha yüksek seviye! Bildirim gönder
+                    await this.sendNotificationToAll(
+                        symbol,
+                        config.name,
+                        config.emoji,
+                        currentPrice,
+                        currentVolume,
+                        history.baselineVolume,
+                        spikeRatio,
+                        multiplier
+                    );
+
+                    // 🔥 Bu seviyeyi bugün için işaretle
+                    this.dailyThresholds.set(symbol, { reachedLevel: multiplier, date: today });
+                    console.log(`[VolumeAlerts] 📊 ${symbol} reached ${multiplier}x - next notification at higher level only`);
+
+                    // En büyük tetiklenen multiplier'ı bulduk, diğerlerini kontrol etme
+                    break;
                 }
             }
         }
