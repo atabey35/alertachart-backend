@@ -27,9 +27,14 @@ export class FundingOIAlertService {
         this.FUNDING_CHECK_INTERVAL = 5 * 60 * 1000; // 5 dakika
         this.OI_HISTORY_DURATION = 60 * 60 * 1000; // 1 saat
 
-        // Thresholds
-        this.FUNDING_THRESHOLD = 0.05; // ±0.05% (aşırı funding rate)
-        this.OI_CHANGE_THRESHOLD = 10; // %10 değişim
+        // Thresholds (ADJUSTED TO REALISTIC MARKET VALUES)
+        // Previous: FUNDING_THRESHOLD = 0.05% was TOO HIGH (never triggered)
+        // Typical extreme funding rates: ±0.01% to ±0.02%
+        this.FUNDING_THRESHOLD = 0.01; // ±0.01% (extreme funding rate - realistic)
+
+        // Previous: OI_CHANGE_THRESHOLD = 10% was TOO HIGH (almost never happens in 1h)
+        // Realistic significant OI change in 1h: 3-5%
+        this.OI_CHANGE_THRESHOLD = 3; // 3% change in 1h (significant market movement)
 
         // İzlenecek coin'ler
         this.watchList = {
