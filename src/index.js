@@ -78,18 +78,16 @@ app.use('/api/admin', adminRouter);
 app.use('/api/auth', authRouter);
 app.use('/api/devices', devicesRouter);
 
-// Error handler
+// Relay endpoints will be added after binanceRelay is initialized
+// (see below after Socket.io setup)
+
+// Error handler - must be after all routes
 app.use((err, req, res, next) => {
   console.error('[Error]', err);
   res.status(500).json({
     error: err.message || 'Internal server error',
     timestamp: Date.now()
   });
-});
-
-// 404 handler
-app.use((req, res) => {
-  res.status(404).json({ error: 'Not found' });
 });
 
 // 🔥 CRITICAL: Add error handler for uncaught exceptions
@@ -140,7 +138,7 @@ const io = new SocketIOServer(httpServer, {
 // Initialize Binance Relay Service
 const binanceRelay = new BinanceRelayService(io);
 
-// Relay status endpoint
+// Relay status endpoint (added before 404 handler via app.get)
 app.get('/api/relay/status', (req, res) => {
   res.json(binanceRelay.getStatus());
 });
@@ -163,6 +161,11 @@ app.get('/api/relay/ticker/:marketType/:symbol', (req, res) => {
   } else {
     res.status(404).json({ error: 'Symbol not found in cache' });
   }
+});
+
+// 404 handler - MUST be after all routes
+app.use((req, res) => {
+  res.status(404).json({ error: 'Not found' });
 });
 
 // Start HTTP server (replaces app.listen)
