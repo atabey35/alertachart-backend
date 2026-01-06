@@ -31,6 +31,7 @@
     "node-cron": "^4.2.1",
     "node-fetch": "^3.3.2",
     "postgres": "^3.4.7",
+    "socket.io": "^4.7.2",
     "ws": "^8.18.3"
   }
 }

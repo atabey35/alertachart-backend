@@ -1,9 +1,12 @@
 /**
  * Alerta Chart Backend - Railway Deployment
  * Historical data API with pagination support
+ * + Binance WebSocket Relay for US users
  */
 
 import express from 'express';
+import { createServer } from 'http';
+import { Server as SocketIOServer } from 'socket.io';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import dotenv from 'dotenv';
@@ -22,6 +25,7 @@ import { getScheduledSummaryService } from './lib/push/scheduled-summary.js';
 import { getFundingOIAlertService } from './lib/push/funding-oi-alerts.js';
 import { initPushDatabase } from './lib/push/db.js';
 import { initAuthDatabase } from './lib/auth/db.js';
+import BinanceRelayService from './services/binance-relay.js';
 
 dotenv.config();
 
@@ -103,7 +107,66 @@ process.on('unhandledRejection', (reason, promise) => {
   process.exit(1);
 });
 
-app.listen(PORT, async () => {
+// Create HTTP server from Express app (needed for Socket.io)
+const httpServer = createServer(app);
+
+// Initialize Socket.io with CORS configuration
+const io = new SocketIOServer(httpServer, {
+  cors: {
+    origin: (origin, callback) => {
+      // Allow requests with no origin (mobile apps, etc.)
+      if (!origin) return callback(null, true);
+
+      // Allow alertachart.com and related origins
+      if (allowedOrigins.includes(origin) ||
+        origin.endsWith('.vercel.app') ||
+        origin === 'https://alertachart.com' ||
+        origin === 'https://www.alertachart.com' ||
+        origin === 'https://aggr.alertachart.com' ||
+        origin.includes('localhost')) {
+        callback(null, true);
+      } else {
+        callback(new Error('Not allowed by CORS'));
+      }
+    },
+    methods: ['GET', 'POST'],
+    credentials: true
+  },
+  pingTimeout: 60000,
+  pingInterval: 25000,
+  transports: ['websocket', 'polling']
+});
+
+// Initialize Binance Relay Service
+const binanceRelay = new BinanceRelayService(io);
+
+// Relay status endpoint
+app.get('/api/relay/status', (req, res) => {
+  res.json(binanceRelay.getStatus());
+});
+
+// Ticker cache endpoints (REST fallback)
+app.get('/api/relay/ticker/:marketType', (req, res) => {
+  const { marketType } = req.params;
+  if (marketType === 'futures') {
+    res.json(binanceRelay.getFuturesCache());
+  } else {
+    res.json(binanceRelay.getSpotCache());
+  }
+});
+
+app.get('/api/relay/ticker/:marketType/:symbol', (req, res) => {
+  const { marketType, symbol } = req.params;
+  const ticker = binanceRelay.getTicker(symbol, marketType);
+  if (ticker) {
+    res.json(ticker);
+  } else {
+    res.status(404).json({ error: 'Symbol not found in cache' });
+  }
+});
+
+// Start HTTP server (replaces app.listen)
+httpServer.listen(PORT, async () => {
   console.log(`🚀 Alerta Chart Backend running on port ${PORT}`);
   console.log(`📊 Environment: ${process.env.NODE_ENV || 'development'}`);
   console.log(`🌍 CORS enabled for: ${allowedOrigins.join(', ')}`);
@@ -136,6 +199,14 @@ app.listen(PORT, async () => {
     process.exit(1);
   }
 
+  // Start Binance Relay Service
+  console.log('');
+  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  console.log('🔌 Starting Binance WebSocket Relay...');
+  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+
+  binanceRelay.start();
+
   // Start auto price alert service
   console.log('');
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
@@ -159,5 +230,6 @@ app.listen(PORT, async () => {
 
   console.log('');
   console.log('✅ All services running!');
+  console.log('🔌 WebSocket Relay available at ws://localhost:' + PORT);
 });
 
