@@ -53,11 +53,11 @@ class BinanceRelayService {
 
     /**
      * Connect to Binance Spot WebSocket
-     * Uses !miniTicker@arr for all spot tickers in single stream
+     * Uses !ticker@arr for all spot tickers with full data including price change %
      */
     connectToSpot() {
-        // !miniTicker@arr = All market mini tickers (lighter than full ticker)
-        const url = 'wss://stream.binance.com:9443/ws/!miniTicker@arr';
+        // !ticker@arr = All market tickers with full data (includes P = price change %)
+        const url = 'wss://stream.binance.com:9443/ws/!ticker@arr';
 
         console.log('[Binance Relay] Connecting to Binance Spot...');
 
@@ -91,10 +91,11 @@ class BinanceRelayService {
 
     /**
      * Connect to Binance Futures WebSocket
-     * Uses !miniTicker@arr for all futures tickers
+     * Uses !ticker@arr for all futures tickers with full data
      */
     connectToFutures() {
-        const url = 'wss://fstream.binance.com/ws/!miniTicker@arr';
+        // !ticker@arr = Full ticker with price change %
+        const url = 'wss://fstream.binance.com/ws/!ticker@arr';
 
         console.log('[Binance Relay] Connecting to Binance Futures...');
 
