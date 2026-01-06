@@ -163,6 +163,29 @@ app.get('/api/relay/ticker/:marketType/:symbol', (req, res) => {
   }
 });
 
+// Exchange Info Proxy - for Symbol Search (US users can't access Binance directly)
+app.get('/api/relay/exchangeInfo/:marketType', async (req, res) => {
+  const { marketType } = req.params;
+
+  try {
+    const url = marketType === 'futures'
+      ? 'https://fapi.binance.com/fapi/v1/exchangeInfo'
+      : 'https://api.binance.com/api/v3/exchangeInfo';
+
+    const response = await fetch(url);
+    const data = await response.json();
+
+    // Cache headers for 5 minutes (exchangeInfo doesn't change often)
+    res.set('Cache-Control', 'public, max-age=300');
+    res.json(data);
+
+    console.log(`[Relay] ExchangeInfo ${marketType}: ${data.symbols?.length || 0} symbols`);
+  } catch (error) {
+    console.error('[Relay] ExchangeInfo error:', error.message);
+    res.status(500).json({ error: 'Failed to fetch exchange info' });
+  }
+});
+
 // 404 handler - MUST be after all routes
 app.use((req, res) => {
   res.status(404).json({ error: 'Not found' });
