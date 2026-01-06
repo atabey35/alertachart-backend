@@ -5,7 +5,7 @@
 
 import WebSocket from 'ws';
 import { getPremiumTrialDevices, getCustomAlertsByType, updateCustomAlertNotification } from './db.js';
-import { sendPriceAlertNotification, sendPushNotifications } from './unified-push.js';
+import { sendPriceAlertNotification, sendPushNotifications, formatPriceString } from './unified-push.js';
 
 /**
  * Yüzde değişim takip servisi
@@ -350,8 +350,8 @@ export class PercentageAlertService {
             const direction = percentChange > 0 ? 'up' : 'down';
             const directionEmoji = direction === 'up' ? '📈' : '📉';
             const absChange = Math.abs(percentChange).toFixed(1);
-            const formattedCurrent = currentPrice.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-            const formattedOld = oldPrice.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+            const formattedCurrent = formatPriceString(currentPrice);
+            const formattedOld = formatPriceString(oldPrice);
 
             // TR Mesajı
             const actionTr = direction === 'up' ? 'yükseldi' : 'düştü';

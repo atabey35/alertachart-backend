@@ -5,7 +5,7 @@
 
 import WebSocket from 'ws';
 import { getPremiumTrialDevices, getCustomAlertsByType, updateCustomAlertNotification } from './db.js';
-import { sendPriceAlertNotification, sendPushNotifications } from './unified-push.js';
+import { sendPriceAlertNotification, sendPushNotifications, formatPriceString } from './unified-push.js';
 
 /**
  * Hacim patlaması takip servisi
@@ -399,7 +399,7 @@ export class VolumeAlertService {
             // Mesajları hazırla
             const formattedCurrent = this.formatVolume(currentVolume);
             const formattedBaseline = this.formatVolume(baselineVolume);
-            const formattedPrice = currentPrice.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+            const formattedPrice = formatPriceString(currentPrice);
             const spikePercent = ((spikeRatio - 1) * 100).toFixed(0);
 
             // TR Mesajı
@@ -551,7 +551,7 @@ export class VolumeAlertService {
 
                     const formattedCurrent = this.formatVolume(currentVolume);
                     const formattedBaseline = this.formatVolume(history.baselineVolume);
-                    const formattedPrice = currentPrice.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                    const formattedPrice = formatPriceString(currentPrice);
 
                     let title, body;
                     if (isTurkish) {
