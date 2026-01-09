@@ -26,6 +26,7 @@ import { getFundingOIAlertService } from './lib/push/funding-oi-alerts.js';
 import { initPushDatabase } from './lib/push/db.js';
 import { initAuthDatabase } from './lib/auth/db.js';
 import BinanceRelayService from './services/binance-relay.js';
+import MarketCapService from './services/market-cap-service.js';
 
 dotenv.config();
 
@@ -138,6 +139,9 @@ const io = new SocketIOServer(httpServer, {
 // Initialize Binance Relay Service
 const binanceRelay = new BinanceRelayService(io);
 
+// Initialize Market Cap Service
+const marketCapService = new MarketCapService(binanceRelay, io);
+
 // Relay status endpoint (added before 404 handler via app.get)
 app.get('/api/relay/status', (req, res) => {
   res.json(binanceRelay.getStatus());
@@ -183,6 +187,74 @@ app.get('/api/relay/exchangeInfo/:marketType', async (req, res) => {
   } catch (error) {
     console.error('[Relay] ExchangeInfo error:', error.message);
     res.status(500).json({ error: 'Failed to fetch exchange info' });
+  }
+});
+
+// Market Cap Index Endpoints
+app.get('/api/marketcap/indices', (req, res) => {
+  res.json(marketCapService.getIndices());
+});
+
+app.get('/api/marketcap/coin/:symbol', (req, res) => {
+  const { symbol } = req.params;
+  const data = marketCapService.getCoinMarketCap(symbol);
+  if (data) {
+    res.json(data);
+  } else {
+    res.status(404).json({ error: 'Coin not found or no supply data' });
+  }
+});
+
+app.get('/api/marketcap/top/:n', (req, res) => {
+  const n = parseInt(req.params.n) || 10;
+  res.json(marketCapService.getTopCoins(n));
+});
+
+// Historical Market Cap Endpoints
+app.get('/api/marketcap/historical', async (req, res) => {
+  const { interval = '1h', limit = 500, index = 'TOTAL', endTime = null } = req.query;
+
+  try {
+    const { getHistoricalMarketCapService } = await import('./services/historical-marketcap-service.js');
+    const service = getHistoricalMarketCapService();
+
+    const data = await service.calculateHistoricalIndices(interval, parseInt(limit), endTime);
+
+    // Return only the requested index type as OHLC candles
+    const MULTIPLIERS = {
+      TOTAL: 1.172,
+      TOTAL2: 1.500,
+      OTHERS: 2.584
+    };
+    const multiplier = MULTIPLIERS[index] || 1;
+
+    const candles = data.map(d => ({
+      time: d.time,
+      open: (d[index.toLowerCase()]?.open || 0) * multiplier,
+      high: (d[index.toLowerCase()]?.high || 0) * multiplier,
+      low: (d[index.toLowerCase()]?.low || 0) * multiplier,
+      close: (d[index.toLowerCase()]?.close || 0) * multiplier,
+    }));
+
+    res.json({ candles, count: candles.length });
+  } catch (error) {
+    console.error('[MarketCap] Historical error:', error.message);
+    res.status(500).json({ error: 'Failed to calculate historical data' });
+  }
+});
+
+// SSE Streaming endpoint for progressive loading
+app.get('/api/marketcap/historical-stream', async (req, res) => {
+  const { interval = '1h', limit = 500, index = 'TOTAL' } = req.query;
+
+  try {
+    const { getHistoricalMarketCapService } = await import('./services/historical-marketcap-service.js');
+    const service = getHistoricalMarketCapService();
+
+    await service.streamHistoricalIndices(res, interval, parseInt(limit), index.toUpperCase());
+  } catch (error) {
+    console.error('[MarketCap] Stream error:', error.message);
+    res.status(500).json({ error: 'Failed to stream historical data' });
   }
 });
 
@@ -232,6 +304,14 @@ httpServer.listen(PORT, async () => {
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 
   binanceRelay.start();
+
+  // Start Market Cap Index Service (after binance relay has data)
+  console.log('');
+  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  console.log('📊 Starting Market Cap Index Service...');
+  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+
+  marketCapService.start();
 
   // Start auto price alert service
   console.log('');

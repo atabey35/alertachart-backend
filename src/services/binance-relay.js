@@ -44,11 +44,42 @@ class BinanceRelayService {
     start() {
         console.log('[Binance Relay] 🚀 Starting Binance WebSocket Relay Service...');
 
+        // Fetch initial snapshot via REST to populate cache immediately
+        this.fetchInitialSnapshot();
+
         this.connectToSpot();
         this.connectToFutures();
         this.setupSocketIOHandlers();
 
         console.log('[Binance Relay] ✅ Relay service started');
+    }
+
+    /**
+     * Fetch initial full snapshot via REST API
+     * (Fixes "Red Daily Candle" issue due to missing inactive coins)
+     */
+    async fetchInitialSnapshot() {
+        try {
+            console.log('[Binance Relay] 📸 Fetching initial snapshot...');
+            const [spotRes, futuresRes] = await Promise.all([
+                fetch('https://api.binance.com/api/v1/ticker/24hr'),
+                fetch('https://fapi.binance.com/fapi/v1/ticker/24hr')
+            ]);
+
+            if (spotRes.ok) {
+                const spotData = await spotRes.json();
+                this.handleSpotMessage(Buffer.from(JSON.stringify(spotData)));
+                console.log(`[Binance Relay] ✅ Initial Spot snapshot loaded: ${spotData.length} coins`);
+            }
+
+            if (futuresRes.ok) {
+                const futuresData = await futuresRes.json();
+                this.handleFuturesMessage(Buffer.from(JSON.stringify(futuresData)));
+                console.log(`[Binance Relay] ✅ Initial Futures snapshot loaded: ${futuresData.length} coins`);
+            }
+        } catch (error) {
+            console.error('[Binance Relay] ❌ Failed to fetch initial snapshot:', error.message);
+        }
     }
 
     /**
