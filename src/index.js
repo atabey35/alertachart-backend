@@ -220,20 +220,16 @@ app.get('/api/marketcap/historical', async (req, res) => {
 
     const data = await service.calculateHistoricalIndices(interval, parseInt(limit), endTime);
 
-    // Return only the requested index type as OHLC candles
-    const MULTIPLIERS = {
-      TOTAL: 1.172,
-      TOTAL2: 1.500,
-      OTHERS: 2.584
-    };
-    const multiplier = MULTIPLIERS[index] || 1;
+    // Historical service now applies multipliers internally, so we don't apply them again
+    const multiplier = 1;
+    const indexKey = index.toLowerCase().replace('.', '.');
 
     const candles = data.map(d => ({
       time: d.time,
-      open: (d[index.toLowerCase()]?.open || 0) * multiplier,
-      high: (d[index.toLowerCase()]?.high || 0) * multiplier,
-      low: (d[index.toLowerCase()]?.low || 0) * multiplier,
-      close: (d[index.toLowerCase()]?.close || 0) * multiplier,
+      open: (d[indexKey]?.open || 0) * multiplier,
+      high: (d[indexKey]?.high || 0) * multiplier,
+      low: (d[indexKey]?.low || 0) * multiplier,
+      close: (d[indexKey]?.close || 0) * multiplier,
     }));
 
     res.json({ candles, count: candles.length });

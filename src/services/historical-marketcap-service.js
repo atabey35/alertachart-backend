@@ -7,7 +7,7 @@
  * SSE (Server-Sent Events) ile progressive streaming destekler.
  */
 
-import { CIRCULATING_SUPPLY, STABLECOINS, TOP_10_SYMBOLS } from '../data/circulating-supply.js';
+import { CIRCULATING_SUPPLY, STABLECOINS, TOP_10_SYMBOLS, DOMINANCE_MULTIPLIERS, INDEX_MULTIPLIERS } from '../data/circulating-supply.js';
 
 // In-memory cache for calculated historical data
 const historyCache = new Map(); // key: `${interval}_${limit}` -> data array
@@ -302,6 +302,11 @@ class HistoricalMarketCapService {
             let total2 = 0, total2Open = 0, total2High = 0, total2Low = 0, total2Close = 0;
             let total2Value = 0; // Separate value accumulator for TOTAL2
 
+            // Track individual coins for dominance calculation
+            let btcMarketCap = 0, btcOpen = 0, btcHigh = 0, btcLow = 0;
+            let ethMarketCap = 0, ethOpen = 0, ethHigh = 0, ethLow = 0;
+            let usdtMarketCap = 0, usdtOpen = 0, usdtHigh = 0, usdtLow = 0;
+
             // Check if BTC exists (Market Validator)
             // If BTC is missing entirely for this timestamp AND it's not a small gap, 
             // it's likely a bad data point for the whole market.
@@ -310,6 +315,16 @@ class HistoricalMarketCapService {
             // Allow BTC to be forward-filled for short gaps, but if it's missing at start, skip
             if (!btcCandle && !lastKnownCandles.get('BTC')) {
                 continue;
+            }
+
+            // Special handling for USDT (stablecoin, no trading pair, always $1)
+            const usdtSupply = CIRCULATING_SUPPLY['USDT'];
+            if (usdtSupply) {
+                const usdtMC = usdtSupply * 1.0; // $1 price
+                usdtMarketCap = usdtMC;
+                usdtOpen = usdtMC;
+                usdtHigh = usdtMC;
+                usdtLow = usdtMC;
             }
 
             let coinsCounted = 0;
@@ -355,21 +370,71 @@ class HistoricalMarketCapService {
                     total2Value = total2Close;
                 }
 
+                // Track individual coins for dominance
+                if (symbol === 'BTC') {
+                    btcMarketCap = mcClose;
+                    btcOpen = mcOpen;
+                    btcHigh = mcHigh;
+                    btcLow = mcLow;
+                }
+                if (symbol === 'ETH') {
+                    ethMarketCap = mcClose;
+                    ethOpen = mcOpen;
+                    ethHigh = mcHigh;
+                    ethLow = mcLow;
+                }
+                if (symbol === 'USDT') {
+                    usdtMarketCap = mcClose;
+                    usdtOpen = mcOpen;
+                    usdtHigh = mcHigh;
+                    usdtLow = mcLow;
+                }
+
                 coinsCounted++;
             }
+
+            // Calculate total WITH stablecoins for dominance
+            const totalWithStablecoins = total + usdtMarketCap;
 
             if (total > 0) {
                 indices.push({
                     time: Math.floor(ts / 1000),
-                    total: { open, high, low, close, value: total },
-                    total2: {
-                        open: total2Open,
-                        high: total2High,
-                        low: total2Low,
-                        close: total2Close,
-                        value: total2Value
+                    total: {
+                        open: open * (INDEX_MULTIPLIERS.TOTAL || 1),
+                        high: high * (INDEX_MULTIPLIERS.TOTAL || 1),
+                        low: low * (INDEX_MULTIPLIERS.TOTAL || 1),
+                        close: close * (INDEX_MULTIPLIERS.TOTAL || 1),
+                        value: total * (INDEX_MULTIPLIERS.TOTAL || 1)
                     },
-                    others: { open: 0, high: 0, low: 0, close: 0, value: 0 } // Disabled
+                    total2: {
+                        open: total2Open * (INDEX_MULTIPLIERS.TOTAL2 || 1),
+                        high: total2High * (INDEX_MULTIPLIERS.TOTAL2 || 1),
+                        low: total2Low * (INDEX_MULTIPLIERS.TOTAL2 || 1),
+                        close: total2Close * (INDEX_MULTIPLIERS.TOTAL2 || 1),
+                        value: total2Value * (INDEX_MULTIPLIERS.TOTAL2 || 1)
+                    },
+                    others: { open: 0, high: 0, low: 0, close: 0, value: 0 }, // Disabled
+                    'btc.d': {
+                        open: ((btcOpen / (open + usdtOpen)) * 100) * (DOMINANCE_MULTIPLIERS['BTC.D'] || 1),
+                        high: ((btcHigh / (high + usdtHigh)) * 100) * (DOMINANCE_MULTIPLIERS['BTC.D'] || 1),
+                        low: ((btcLow / (low + usdtLow)) * 100) * (DOMINANCE_MULTIPLIERS['BTC.D'] || 1),
+                        close: ((btcMarketCap / (close + usdtMarketCap)) * 100) * (DOMINANCE_MULTIPLIERS['BTC.D'] || 1),
+                        value: ((btcMarketCap / totalWithStablecoins) * 100) * (DOMINANCE_MULTIPLIERS['BTC.D'] || 1)
+                    },
+                    'eth.d': {
+                        open: ((ethOpen / (open + usdtOpen)) * 100) * (DOMINANCE_MULTIPLIERS['ETH.D'] || 1),
+                        high: ((ethHigh / (high + usdtHigh)) * 100) * (DOMINANCE_MULTIPLIERS['ETH.D'] || 1),
+                        low: ((ethLow / (low + usdtLow)) * 100) * (DOMINANCE_MULTIPLIERS['ETH.D'] || 1),
+                        close: ((ethMarketCap / (close + usdtMarketCap)) * 100) * (DOMINANCE_MULTIPLIERS['ETH.D'] || 1),
+                        value: ((ethMarketCap / totalWithStablecoins) * 100) * (DOMINANCE_MULTIPLIERS['ETH.D'] || 1)
+                    },
+                    'usdt.d': {
+                        open: ((usdtOpen / (open + usdtOpen)) * 100) * (DOMINANCE_MULTIPLIERS['USDT.D'] || 1),
+                        high: ((usdtHigh / (high + usdtHigh)) * 100) * (DOMINANCE_MULTIPLIERS['USDT.D'] || 1),
+                        low: ((usdtLow / (low + usdtLow)) * 100) * (DOMINANCE_MULTIPLIERS['USDT.D'] || 1),
+                        close: ((usdtMarketCap / (close + usdtMarketCap)) * 100) * (DOMINANCE_MULTIPLIERS['USDT.D'] || 1),
+                        value: ((usdtMarketCap / totalWithStablecoins) * 100) * (DOMINANCE_MULTIPLIERS['USDT.D'] || 1)
+                    }
                 });
             }
         }

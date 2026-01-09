@@ -13,7 +13,7 @@ export const CIRCULATING_SUPPLY = {
     // Top 10 (TOTAL hesaplaması için)
     BTC: 19_600_000,
     ETH: 120_270_000,
-    USDT: 91_000_000_000, // Stablecoin - market cap'e dahil edilmeyecek
+    USDT: 187_000_000_000, // Stablecoin - $1 price, ~187B supply (CMC: Jan 2026)
     BNB: 153_856_150,
     SOL: 441_000_000,
     XRP: 54_000_000_000,
@@ -136,6 +136,14 @@ export const INDEX_MULTIPLIERS = {
     TOTAL: 1.172,
     TOTAL2: 1.500,
     OTHERS: 2.584,
+};
+
+// Dominance çarpanları (TradingView verileriyle eşleşmesi için)
+// Hesaplama: TradingView değeri / Bizim raw değer
+export const DOMINANCE_MULTIPLIERS = {
+    'BTC.D': 0.931,  // 59.11 / 63.48
+    'ETH.D': 0.917,  // 12.19 / 13.30
+    'USDT.D': 0.914, // 6.118 / 6.69
 };
 
 export default CIRCULATING_SUPPLY;
